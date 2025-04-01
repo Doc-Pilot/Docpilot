@@ -1,3 +1,10 @@
+"""
+Greeting Example
+================
+
+This example demonstrates how to generate greetings using DocPilot's agents.
+"""
+# Importing Dependencies
 import os
 import sys
 from dataclasses import dataclass
