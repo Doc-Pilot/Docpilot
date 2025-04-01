@@ -3,6 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from .base import BaseAgent, AgentConfig
 from .code_analyzer import CodeElement
+from ..prompts.agent_prompts import QUALITY_CHECKER_PROMPT
 
 @dataclass
 class QualityCheckInput:
@@ -51,14 +52,7 @@ class QualityChecker(BaseAgent[QualityResult]):
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
             config=config or AgentConfig(),
-            system_prompt="""You are a documentation quality expert. Evaluate documentation for:
-            1. Completeness and accuracy
-            2. Clarity and readability
-            3. Consistency with style guides
-            4. Helpfulness and usefulness
-            5. Technical correctness
-            
-            Provide detailed feedback and suggestions for improvement.""",
+            system_prompt=QUALITY_CHECKER_PROMPT,
             model_type=QualityResult
         )
     

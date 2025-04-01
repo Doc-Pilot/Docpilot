@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from .base import BaseAgent, AgentConfig
+from ..prompts.agent_prompts import CODE_ANALYZER_PROMPT
 
 @dataclass
 class CodeElement:
@@ -48,14 +49,7 @@ class CodeAnalyzer(BaseAgent[CodeAnalysisResult]):
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
             config=config or AgentConfig(),
-            system_prompt="""You are a code analysis expert. Analyze code to:
-            1. Extract key information from code elements
-            2. Understand the purpose and functionality
-            3. Identify inputs, outputs and dependencies
-            4. Determine the programming language
-            5. Assess complexity and potential issues
-            
-            Provide detailed, accurate analysis.""",
+            system_prompt=CODE_ANALYZER_PROMPT,
             model_type=CodeAnalysisResult
         )
     

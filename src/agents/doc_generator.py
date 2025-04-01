@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from .base import BaseAgent, AgentConfig
 from .code_analyzer import CodeElement
+from ..prompts.agent_prompts import DOC_GENERATOR_PROMPT
 
 @dataclass
 class DocGeneratorInput:
@@ -46,14 +47,7 @@ class DocGenerator(BaseAgent[DocumentationResult]):
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
             config=config or AgentConfig(),
-            system_prompt="""You are a documentation expert. Generate high-quality documentation that:
-            1. Follows the specified style guide (default: Google style)
-            2. Clearly explains purpose, parameters, and return values
-            3. Includes helpful examples where appropriate
-            4. Is concise yet comprehensive
-            5. Maintains consistency with existing documentation conventions
-            
-            Provide clear, accurate documentation that helps developers understand and use the code.""",
+            system_prompt=DOC_GENERATOR_PROMPT,
             model_type=DocumentationResult
         )
     
