@@ -1,7 +1,21 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
+import os
 
-from src.agents import DocGenerator, CodeAnalyzer, QualityChecker, DocGeneratorInput, AgentConfig
+from src.agents import (
+    DocGenerator, 
+    CodeAnalyzer, 
+    QualityChecker, 
+    DocGeneratorInput, 
+    AgentConfig,
+    RepoAnalyzer,
+    RepoStructureInput,
+    APIDocGenerator,
+    APIDocInput,
+    ReadmeGenerator,
+    ReadmeInput
+)
+from src.utils.repo_scanner import RepoScanner
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +46,40 @@ async def handle_push_event(payload: Dict[Any, Any]) -> Dict[str, Any]:
         # Remove duplicates
         modified_files = list(set(modified_files))
         
+        # Check if we should analyze the entire repository
+        should_analyze_repo = any([
+            # README changes
+            f for f in modified_files if f.lower().endswith('readme.md')
+        ]) or len(modified_files) > 10  # Many files changed
+        
+        results = {}
+        
+        if should_analyze_repo:
+            # Analyze repository structure for better context
+            logger.info(f"Analyzing repository structure for {repo_name}")
+            results["repo_analysis"] = await analyze_repository_structure(repo_name, ref.replace("refs/heads/", ""))
+        
+        # Check for API-specific files
+        api_files = [f for f in modified_files if _is_api_file(f)]
+        if api_files:
+            logger.info(f"Processing API files: {api_files}")
+            results["api_docs"] = await process_api_files(repo_name, ref.replace("refs/heads/", ""), api_files)
+        
         # Generate documentation for modified files
         doc_generator = DocGenerator()
-        results = await doc_generator.process_file_changes(
+        doc_results = await doc_generator.process_file_changes(
             repo_name=repo_name,
             branch=ref.replace("refs/heads/", ""),
             file_paths=modified_files
         )
+        results["documentation_updated"] = doc_results
         
         return {
             "status": "success",
             "repository": repo_name,
             "branch": ref,
             "processed_files": len(modified_files),
-            "documentation_updated": results
+            "results": results
         }
     
     except Exception as e:
@@ -74,6 +108,31 @@ async def handle_pull_request_event(payload: Dict[Any, Any]) -> Dict[str, Any]:
         
         logger.info(f"Processing PR #{pr_number} in {repo_name}")
         
+        # Analyze PR content to understand the changes better
+        changed_files = pr.get("changed_files", 0)
+        
+        results = {}
+        
+        # For larger PRs, perform a repository structure analysis
+        if changed_files > 5:
+            logger.info(f"Large PR detected ({changed_files} files), analyzing repository structure")
+            results["repo_analysis"] = await analyze_repository_structure(
+                repo_name, 
+                pr.get("head", {}).get("ref", "")
+            )
+        
+        # Check if PR includes API changes
+        if pr.get("title", "").lower().find("api") >= 0 or pr.get("body", "").lower().find("api") >= 0:
+            logger.info("API changes detected in PR, generating API documentation")
+            # Get files from PR
+            # Note: In a real implementation, you would fetch the PR files using the GitHub API
+            api_files = []  # This would be populated with actual files
+            results["api_docs"] = await process_api_files(
+                repo_name, 
+                pr.get("head", {}).get("ref", ""),
+                api_files
+            )
+        
         # Generate documentation suggestions for the PR
         doc_generator = DocGenerator()
         suggestions = await doc_generator.process_pull_request(
@@ -81,12 +140,13 @@ async def handle_pull_request_event(payload: Dict[Any, Any]) -> Dict[str, Any]:
             pr_number=pr_number,
             head_sha=head_sha
         )
+        results["documentation_suggestions"] = suggestions
         
         return {
             "status": "success",
             "repository": repo_name,
             "pr_number": pr_number,
-            "documentation_suggestions": suggestions
+            "results": results
         }
     
     except Exception as e:
@@ -115,6 +175,25 @@ async def handle_issues_event(payload: Dict[Any, Any]) -> Dict[str, Any]:
         
         logger.info(f"Processing documentation issue #{issue_number} in {repo_name}")
         
+        results = {}
+        
+        # For documentation-related issues, analyze repo structure
+        if "documentation" in labels or issue.get("title", "").lower().find("doc") >= 0:
+            logger.info("Documentation issue detected, analyzing repository structure")
+            results["repo_analysis"] = await analyze_repository_structure(repo_name, "main")
+            
+            # Check if issue is specifically about README
+            if issue.get("title", "").lower().find("readme") >= 0 or issue.get("body", "").lower().find("readme") >= 0:
+                logger.info("README issue detected, generating improved README")
+                results["readme"] = await generate_readme(repo_name, results["repo_analysis"])
+            
+            # Check if issue is about API documentation
+            if issue.get("title", "").lower().find("api") >= 0 or issue.get("body", "").lower().find("api doc") >= 0:
+                logger.info("API documentation issue detected")
+                # In a real implementation, you would identify API files here
+                api_files = []  # This would be populated with actual files
+                results["api_docs"] = await process_api_files(repo_name, "main", api_files)
+        
         # Process documentation issue
         doc_generator = DocGenerator()
         response = await doc_generator.process_documentation_issue(
@@ -123,14 +202,257 @@ async def handle_issues_event(payload: Dict[Any, Any]) -> Dict[str, Any]:
             issue_title=issue.get("title", ""),
             issue_body=issue.get("body", "")
         )
+        results["response"] = response
         
         return {
             "status": "success",
             "repository": repo_name,
             "issue_number": issue_number,
-            "response": response
+            "results": results
         }
     
     except Exception as e:
         logger.exception(f"Error processing issue event: {str(e)}")
-        return {"status": "error", "message": str(e)} 
+        return {"status": "error", "message": str(e)}
+
+async def analyze_repository_structure(repo_name: str, branch: str) -> Dict[str, Any]:
+    """
+    Analyze repository structure to provide context for documentation
+    
+    Args:
+        repo_name: Full repository name
+        branch: Branch name
+        
+    Returns:
+        Analysis results
+    """
+    logger.info(f"Analyzing repository structure for {repo_name} on {branch}")
+    
+    try:
+        # In a real implementation, you would clone the repository or use GitHub API
+        # to get the files. For this example, we'll simulate it.
+        
+        # Initialize repo scanner and agents
+        # Note: In a real implementation, this would use a temporary directory with cloned repo
+        repo_scanner = RepoScanner("/tmp/repo")
+        file_list = repo_scanner.scan_files()
+        
+        # Initialize repository analyzer
+        repo_analyzer = RepoAnalyzer()
+        
+        # Analyze repository structure
+        result = await repo_analyzer.analyze_repo_structure(
+            RepoStructureInput(
+                repo_path=repo_name,
+                files=file_list
+            )
+        )
+        
+        # Generate markdown summary
+        markdown_summary = await repo_analyzer.generate_markdown_summary(result)
+        
+        # Identify documentation needs
+        doc_needs = await repo_analyzer.identify_documentation_needs(result)
+        
+        return {
+            "summary": result.summary,
+            "technologies": result.technologies,
+            "architecture": result.architecture_pattern,
+            "components": [
+                {"name": comp.name, "description": comp.description}
+                for comp in result.components
+            ],
+            "documentation_needs": doc_needs,
+            "markdown_summary": markdown_summary.content
+        }
+    
+    except Exception as e:
+        logger.exception(f"Error analyzing repository structure: {str(e)}")
+        return {"error": str(e)}
+
+async def process_api_files(repo_name: str, branch: str, file_paths: List[str]) -> Dict[str, Any]:
+    """
+    Process API files to generate API documentation
+    
+    Args:
+        repo_name: Full repository name
+        branch: Branch name
+        file_paths: List of files to process
+        
+    Returns:
+        API documentation results
+    """
+    logger.info(f"Processing API files for {repo_name} on {branch}: {file_paths}")
+    
+    try:
+        results = {}
+        api_doc_generator = APIDocGenerator()
+        
+        for file_path in file_paths:
+            # In a real implementation, you would get file content from GitHub
+            # For this example, we'll simulate it with placeholder content
+            file_content = "# Placeholder API content"
+            
+            # Determine the language and framework based on file extension
+            language, framework = _detect_language_and_framework(file_path)
+            
+            api_doc_result = await api_doc_generator.generate_api_docs(
+                APIDocInput(
+                    code=file_content,
+                    api_name=f"{repo_name} API",
+                    language=language,
+                    framework=framework
+                )
+            )
+            
+            results[file_path] = {
+                "title": api_doc_result.title,
+                "version": api_doc_result.version,
+                "description": api_doc_result.description,
+                "endpoints": len(api_doc_result.endpoints),
+                "markdown": api_doc_result.markdown
+            }
+            
+        return results
+    
+    except Exception as e:
+        logger.exception(f"Error processing API files: {str(e)}")
+        return {"error": str(e)}
+
+async def generate_readme(repo_name: str, repo_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate or update README based on repository analysis
+    
+    Args:
+        repo_name: Full repository name
+        repo_analysis: Repository analysis results
+        
+    Returns:
+        README generation results
+    """
+    logger.info(f"Generating README for {repo_name}")
+    
+    try:
+        # Initialize README generator
+        readme_generator = ReadmeGenerator()
+        
+        # Convert repo_analysis dict to RepoStructureResult
+        # In a real implementation, you would use a proper RepoStructureResult object
+        
+        # Check if README already exists
+        # In a real implementation, you would check if README exists in the repository
+        existing_readme = None
+        
+        if existing_readme:
+            # Update existing README
+            result = await readme_generator.update_readme(
+                ReadmeInput(
+                    repo_name=repo_name,
+                    repo_description=repo_analysis.get("summary", ""),
+                    # repo_structure would be a proper RepoStructureResult in real implementation
+                    existing_readme=existing_readme
+                )
+            )
+            action = "updated"
+        else:
+            # Generate new README
+            result = await readme_generator.generate_readme(
+                ReadmeInput(
+                    repo_name=repo_name,
+                    repo_description=repo_analysis.get("summary", "")
+                    # repo_structure would be a proper RepoStructureResult in real implementation
+                )
+            )
+            action = "created"
+        
+        return {
+            "action": action,
+            "title": result.title,
+            "sections": len(result.sections),
+            "markdown": result.markdown
+        }
+    
+    except Exception as e:
+        logger.exception(f"Error generating README: {str(e)}")
+        return {"error": str(e)}
+
+def _is_api_file(file_path: str) -> bool:
+    """
+    Check if a file is likely to contain API definitions
+    
+    Args:
+        file_path: File path
+        
+    Returns:
+        True if the file is likely an API file, False otherwise
+    """
+    # Common API file patterns
+    api_patterns = [
+        "api", "controller", "route", "endpoint", "rest", "http",
+        "service", "resource", "graphql", "swagger", "openapi"
+    ]
+    
+    file_path_lower = file_path.lower()
+    
+    # Check extension first - common API file extensions
+    _, ext = os.path.splitext(file_path_lower)
+    if ext in ['.py', '.js', '.ts', '.go', '.java', '.rb', '.php']:
+        # Check if filename contains API-related terms
+        filename = os.path.basename(file_path_lower)
+        return any(pattern in filename for pattern in api_patterns)
+    
+    # Check for OpenAPI/Swagger files
+    if ext in ['.json', '.yaml', '.yml'] and (
+        'swagger' in file_path_lower or 
+        'openapi' in file_path_lower or
+        'api' in file_path_lower
+    ):
+        return True
+        
+    return False
+
+def _detect_language_and_framework(file_path: str) -> tuple:
+    """
+    Detect language and framework based on file path
+    
+    Args:
+        file_path: File path
+        
+    Returns:
+        Tuple of (language, framework)
+    """
+    ext_to_language = {
+        '.py': 'python',
+        '.js': 'javascript',
+        '.ts': 'typescript',
+        '.go': 'go',
+        '.java': 'java',
+        '.rb': 'ruby',
+        '.php': 'php',
+        '.json': 'json',
+        '.yaml': 'yaml',
+        '.yml': 'yaml',
+    }
+    
+    path_to_framework = {
+        'flask': 'Flask',
+        'django': 'Django',
+        'fastapi': 'FastAPI',
+        'express': 'Express',
+        'spring': 'Spring',
+        'rails': 'Rails',
+        'laravel': 'Laravel',
+        'swagger': 'OpenAPI',
+        'openapi': 'OpenAPI',
+    }
+    
+    _, ext = os.path.splitext(file_path.lower())
+    language = ext_to_language.get(ext, 'unknown')
+    
+    framework = None
+    for fw_name, fw in path_to_framework.items():
+        if fw_name in file_path.lower():
+            framework = fw
+            break
+    
+    return language, framework 
