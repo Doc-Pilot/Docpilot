@@ -14,6 +14,15 @@ class APIDocInput:
     include_examples: bool = True
     example_languages: List[str] = field(default_factory=lambda: ["python", "javascript", "curl"])
     existing_docs: Optional[str] = None
+    # Enhanced context fields
+    project_description: Optional[str] = None
+    related_endpoints: Optional[List[str]] = None
+    authentication_details: Optional[Dict[str, Any]] = None
+    dependencies: Optional[List[str]] = None
+    directory_structure: Optional[str] = None
+    usage_patterns: Optional[List[str]] = None
+    target_audience: Optional[str] = None
+    implementation_details: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         """Validate the input after initialization"""
@@ -65,7 +74,7 @@ class APIDocGenerator(BaseAgent[APIDocResult]):
         self,
         input_data: APIDocInput
     ) -> APIDocResult:
-        """Generate API documentation for the provided code"""
+        """Generate API documentation for the provided code with enhanced context"""
         # Validate input
         if not input_data.code or not input_data.code.strip():
             raise ValueError("API code cannot be empty")
@@ -75,17 +84,68 @@ class APIDocGenerator(BaseAgent[APIDocResult]):
         # Build the prompt with details on framework if available
         framework_text = f" using {input_data.framework}" if input_data.framework else ""
         
+        # Include project description if available
+        project_description = ""
+        if input_data.project_description:
+            project_description = f"\nProject Description: {input_data.project_description}"
+        
+        # Include authentication details if available
+        auth_details = ""
+        if input_data.authentication_details:
+            auth_details = "\nAuthentication Details:"
+            for auth_type, auth_info in input_data.authentication_details.items():
+                auth_details += f"\n- {auth_type}: {auth_info}"
+        
+        # Include dependencies if available
+        dependencies_text = ""
+        if input_data.dependencies and len(input_data.dependencies) > 0:
+            dependencies_text = f"\nDependencies: {', '.join(input_data.dependencies)}"
+        
+        # Include directory structure if available
+        dir_structure_text = ""
+        if input_data.directory_structure:
+            dir_structure_text = f"\n\nProject Structure:\n```\n{input_data.directory_structure}\n```"
+        
+        # Include usage patterns if available
+        usage_patterns_text = ""
+        if input_data.usage_patterns and len(input_data.usage_patterns) > 0:
+            patterns = "\n".join([f"- {pattern}" for pattern in input_data.usage_patterns])
+            usage_patterns_text = f"\n\nCommon Usage Patterns:\n{patterns}"
+        
+        # Include target audience if available
+        audience_text = ""
+        if input_data.target_audience:
+            audience_text = f"\n\nTarget Audience: {input_data.target_audience}"
+        
+        # Include implementation details if available
+        implementation_text = ""
+        if input_data.implementation_details:
+            implementation_text = "\n\nImplementation Details:"
+            for key, value in input_data.implementation_details.items():
+                implementation_text += f"\n- {key}: {value}"
+        
+        # Include existing documentation if available
+        existing_docs_text = ""
+        if input_data.existing_docs:
+            existing_docs_text = f"\n\nExisting Documentation:\n```markdown\n{input_data.existing_docs}\n```"
+        
+        # Combine all context
+        enhanced_context = f"{project_description}{auth_details}{dependencies_text}{dir_structure_text}{usage_patterns_text}{audience_text}{implementation_text}{existing_docs_text}"
+        
         return self.run_sync(
-            user_prompt=f"Generate API documentation for {input_data.api_name} in {input_data.language}{framework_text}. Include both Markdown documentation and OpenAPI specification.\n\n```{input_data.language}\n{input_data.code}\n```",
+            user_prompt=f"Generate API documentation for {input_data.api_name} in {input_data.language}{framework_text}. Include both Markdown documentation and OpenAPI specification.{enhanced_context}\n\n```{input_data.language}\n{input_data.code}\n```",
             deps=input_data
         )
     
     def generate_api_examples(
         self,
         api_doc: APIDocResult,
-        languages: List[str] = ["python", "javascript", "curl"]
+        languages: List[str] = ["python", "javascript", "curl"],
+        usage_patterns: Optional[List[str]] = None,
+        target_audience: Optional[str] = None,
+        implementation_details: Optional[Dict[str, Any]] = None
     ) -> APIExamplesResult:
-        """Generate usage examples for the API"""
+        """Generate usage examples for the API with enhanced context"""
         if not api_doc:
             raise ValueError("API documentation cannot be empty")
             
@@ -97,12 +157,33 @@ class APIDocGenerator(BaseAgent[APIDocResult]):
         
         languages_text = ", ".join(languages)
         
+        # Include usage patterns if available
+        usage_patterns_text = ""
+        if usage_patterns and len(usage_patterns) > 0:
+            patterns = "\n".join([f"- {pattern}" for pattern in usage_patterns])
+            usage_patterns_text = f"\n\nCommon Usage Patterns:\n{patterns}"
+        
+        # Include target audience if available
+        audience_text = ""
+        if target_audience:
+            audience_text = f"\n\nTarget Audience: {target_audience}"
+        
+        # Include implementation details if available
+        implementation_text = ""
+        if implementation_details:
+            implementation_text = "\n\nImplementation Details:"
+            for key, value in implementation_details.items():
+                implementation_text += f"\n- {key}: {value}"
+        
+        # Combine all context
+        enhanced_context = f"{usage_patterns_text}{audience_text}{implementation_text}"
+        
         result = self.run_sync(
             user_prompt=f"""Generate usage examples for these API endpoints in {languages_text}:
 
 API: {api_doc.title} v{api_doc.version}
 Description: {api_doc.description}
-Base Path: {api_doc.base_path or "/"}
+Base Path: {api_doc.base_path or "/"}{enhanced_context}
 
 Endpoints:
 {endpoints_text}
