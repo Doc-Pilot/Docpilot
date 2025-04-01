@@ -1,7 +1,12 @@
 """
-DocPilot Utilities Module
+DocPilot Utilities
+=================
 
-This module provides utility functions for DocPilot.
+Utility functions and classes for DocPilot.
 """
 
-from .config import get_settings, Settings 
+from .logging import logger
+from .config import get_settings
+from .repo_scanner import RepoScanner
+
+__all__ = ['logger', 'get_settings', 'RepoScanner'] 

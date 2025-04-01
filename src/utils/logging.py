@@ -1,3 +1,10 @@
+"""
+Logging Utility
+===============
+
+This utility provides a logging setup for DocPilot.
+"""
+
 # Importing Dependencies
 import logfire
 from dotenv import load_dotenv

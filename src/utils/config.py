@@ -1,3 +1,11 @@
+"""
+Configuration Utility
+====================
+
+This utility provides configuration settings for DocPilot.
+"""
+
+# Importing Dependencies
 import os
 from functools import lru_cache
 from pydantic import BaseModel
