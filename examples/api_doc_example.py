@@ -112,23 +112,73 @@ async def complete_task(task_id: str, api_key: str = Header(...)):
 '''
 
 def generate_api_documentation():
-    """Generate API documentation from example code"""
-    print("Generating API Documentation Example")
+    """Generate API documentation from example code with enhanced context"""
+    print("Generating API Documentation Example with Enhanced Context")
     
     # Configure agent
     agent_config = AgentConfig()
     
+    # Create mock directory structure for enhanced context
+    mock_directory_structure = """
+task_api/
+├── app/
+│   ├── __init__.py
+│   ├── main.py - Main application entry point
+│   ├── models.py - Data models
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── tasks.py - Task endpoints
+│   │   └── auth.py - Authentication
+│   └── db/
+│       ├── __init__.py
+│       └── database.py - Database connection
+├── tests/
+│   ├── __init__.py
+│   └── test_tasks.py - Task API tests
+├── docs/
+│   └── api_reference.md - API documentation
+├── README.md
+└── requirements.txt
+"""
+
+    # Define usage patterns for enhanced context
+    usage_patterns = [
+        "Authenticate with API key header for all requests",
+        "List all tasks and paginate through results",
+        "Create a new task with title and optional description",
+        "Retrieve, update, and delete specific tasks by ID",
+        "Mark tasks as completed without changing other properties"
+    ]
+    
+    # Define authentication details for enhanced context
+    auth_details = {
+        "API Key": "Required in header for all endpoints as 'api_key'",
+        "Format": "Simple string, no prefix needed",
+        "Restrictions": "Rate limited to 100 requests per minute"
+    }
+    
     # Initialize API documentation generator
     api_doc_generator = APIDocGenerator(config=agent_config)
     
-    # Generate API documentation
-    print("\nGenerating API documentation...")
+    # Generate API documentation with enhanced context
+    print("\nGenerating API documentation with enhanced context...")
     api_doc_result = api_doc_generator.generate_api_docs(
         APIDocInput(
             code=FASTAPI_EXAMPLE,
             api_name="Task Management API",
             language="python",
-            framework="FastAPI"
+            framework="FastAPI",
+            project_description="A RESTful API for managing tasks with authentication and CRUD operations",
+            directory_structure=mock_directory_structure,
+            authentication_details=auth_details,
+            dependencies=["fastapi", "uvicorn", "pydantic", "python-multipart"],
+            usage_patterns=usage_patterns,
+            target_audience="Backend developers and frontend consumers needing task management functionality",
+            implementation_details={
+                "Database": "In-memory for example, would use PostgreSQL in production",
+                "Authentication": "API key based, would use OAuth2 in production",
+                "Deployment": "Designed to be deployed as a containerized service"
+            }
         )
     )
     
@@ -142,11 +192,17 @@ def generate_api_documentation():
     for endpoint in api_doc_result.endpoints:
         print(f"  {endpoint.method} {endpoint.path} - {endpoint.summary}")
     
-    # Generate examples
-    print("\nGenerating API usage examples...")
+    # Generate examples with enhanced context
+    print("\nGenerating API usage examples with enhanced context...")
     examples_result = api_doc_generator.generate_api_examples(
         api_doc_result,
-        languages=["python", "javascript", "curl"]
+        languages=["python", "javascript", "curl"],
+        usage_patterns=usage_patterns,
+        target_audience="Backend developers and frontend consumers",
+        implementation_details={
+            "Authentication": "API key in header",
+            "Response Format": "JSON with consistent error handling"
+        }
     )
     
     # Print examples
@@ -162,19 +218,19 @@ def generate_api_documentation():
     
     # Save Markdown documentation
     markdown_path = os.path.join(output_dir, "api_documentation.md")
-    with open(markdown_path, "w") as f:
+    with open(markdown_path, "w", encoding="utf-8") as f:
         f.write(api_doc_result.markdown)
     print(f"Saved Markdown documentation to {markdown_path}")
     
     # Save OpenAPI specification
     openapi_path = os.path.join(output_dir, "openapi.json")
-    with open(openapi_path, "w") as f:
+    with open(openapi_path, "w", encoding="utf-8") as f:
         json.dump(openapi_spec, f, indent=2)
     print(f"Saved OpenAPI specification to {openapi_path}")
     
     # Save examples
     examples_path = os.path.join(output_dir, "api_examples.md")
-    with open(examples_path, "w") as f:
+    with open(examples_path, "w", encoding="utf-8") as f:
         f.write("# API Usage Examples\n\n")
         for example in examples_result.examples:
             f.write(f"## {example.get('endpoint', 'Example')}\n\n")
@@ -189,6 +245,26 @@ def generate_api_documentation():
                 f.write(example.get('response', '# No response available'))
                 f.write("\n```\n\n")
     print(f"Saved API examples to {examples_path}")
+    
+    # Save the enhanced context as JSON for reference
+    context_path = os.path.join(output_dir, "api_enhanced_context.json")
+    with open(context_path, "w", encoding="utf-8") as f:
+        enhanced_context = {
+            "api_name": "Task Management API",
+            "project_description": "A RESTful API for managing tasks with authentication and CRUD operations",
+            "directory_structure": mock_directory_structure,
+            "authentication_details": auth_details,
+            "dependencies": ["fastapi", "uvicorn", "pydantic", "python-multipart"],
+            "usage_patterns": usage_patterns,
+            "target_audience": "Backend developers and frontend consumers needing task management functionality",
+            "implementation_details": {
+                "Database": "In-memory for example, would use PostgreSQL in production",
+                "Authentication": "API key based, would use OAuth2 in production",
+                "Deployment": "Designed to be deployed as a containerized service"
+            }
+        }
+        json.dump(enhanced_context, f, indent=2)
+    print(f"Saved enhanced context to {context_path}")
 
 if __name__ == "__main__":
     generate_api_documentation() 
