@@ -1,0 +1,84 @@
+{
+  "repo_name": "Docpilot",
+  "repo_description": "The repository includes a FastAPI application with various agents for document generation and analysis. It is organized into multiple modules including agents, API, GitHub interaction, utilities, and tests. The main entry point for the application is app.py. The project also includes example usage and documentation.",
+  "directory_structure": "Docpilot/\n\u251c\u2500\u2500 docs/ - Documentation files\n\u2502   \u2514\u2500\u2500 user_guide.md\n\u251c\u2500\u2500 examples/ - Example code and usage\n\u2502   \u251c\u2500\u2500 output/\n\u2502   \u2502   \u251c\u2500\u2500 api_documentation.md\n\u2502   \u2502   \u251c\u2500\u2500 api_examples.md\n\u2502   \u2502   \u251c\u2500\u2500 openapi.json\n\u2502   \u2502   \u251c\u2500\u2500 README.md\n\u2502   \u2502   \u2514\u2500\u2500 STRUCTURE.md\n\u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u251c\u2500\u2500 api_doc_example.py\n\u2502   \u251c\u2500\u2500 greeting_example.py\n\u2502   \u2514\u2500\u2500 repo_analyzer_example.py\n\u251c\u2500\u2500 src/ - Source code\n\u2502   \u251c\u2500\u2500 agents/\n\u2502   \u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u2502   \u251c\u2500\u2500 api_doc_generator.py\n\u2502   \u2502   \u251c\u2500\u2500 base.py\n\u2502   \u2502   \u251c\u2500\u2500 code_analyzer.py\n\u2502   \u2502   \u251c\u2500\u2500 doc_generator.py\n\u2502   \u2502   \u251c\u2500\u2500 quality_checker.py\n\u2502   \u2502   \u251c\u2500\u2500 readme_generator.py\n\u2502   \u2502   \u2514\u2500\u2500 repo_analyzer.py\n\u2502   \u251c\u2500\u2500 api/\n\u2502   \u2502   \u251c\u2500\u2500 routes/\n\u2502   \u2502   \u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u2502   \u2502   \u2514\u2500\u2500 github_webhook.py\n\u2502   \u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u2502   \u2514\u2500\u2500 app.py\n\u2502   \u251c\u2500\u2500 github/\n\u2502   \u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u2502   \u251c\u2500\u2500 github_client.py\n\u2502   \u2502   \u2514\u2500\u2500 handlers.py\n\u2502   \u251c\u2500\u2500 prompts/\n\u2502   \u2502   \u2514\u2500\u2500 agent_prompts.py\n\u2502   \u2514\u2500\u2500 utils/\n\u2502       \u251c\u2500\u2500 __init__.py\n\u2502       \u251c\u2500\u2500 config.py\n\u2502       \u251c\u2500\u2500 logging.py\n\u2502       \u2514\u2500\u2500 repo_scanner.py\n\u251c\u2500\u2500 tests/ - Test files\n\u2502   \u251c\u2500\u2500 __init__.py\n\u2502   \u251c\u2500\u2500 conftest.py\n\u2502   \u251c\u2500\u2500 test_agent_examples.py\n\u2502   \u251c\u2500\u2500 test_base_agent.py\n\u2502   \u2514\u2500\u2500 test_repo_analyzer.py\n\u251c\u2500\u2500 .env\n\u251c\u2500\u2500 .gitignore\n\u251c\u2500\u2500 docker-compose.yml\n\u251c\u2500\u2500 Dockerfile\n\u251c\u2500\u2500 LICENSE\n\u251c\u2500\u2500 README.md\n\u2514\u2500\u2500 requirements.txt\n",
+  "technologies": [
+    "FastAPI",
+    "Python",
+    "Docker",
+    "pytest"
+  ],
+  "architecture_pattern": "Microservices",
+  "components": [
+    {
+      "name": "Agents",
+      "description": "Module containing various agents for document generation and analysis."
+    },
+    {
+      "name": "API",
+      "description": "FastAPI module for creating the web API."
+    },
+    {
+      "name": "GitHub",
+      "description": "Integration with GitHub API."
+    },
+    {
+      "name": "Utilities",
+      "description": "Helper utilities and configurations."
+    },
+    {
+      "name": "Tests",
+      "description": "Unit and integration tests for the application."
+    },
+    {
+      "name": "Examples",
+      "description": "Example usages and outputs for the project."
+    },
+    {
+      "name": "Documentation",
+      "description": "User guides and APIs for the application."
+    }
+  ],
+  "entry_points": [
+    "src\\api\\app.py"
+  ],
+  "documentation_needs": {
+    "README": [
+      "Main README.md needs to be created or updated"
+    ],
+    "API Documentation": [
+      "API documentation should be generated"
+    ],
+    "Component Documentation": [
+      "Documentation for Agents",
+      "Documentation for API",
+      "Documentation for GitHub",
+      "Documentation for Utilities",
+      "Documentation for Tests",
+      "Documentation for Examples",
+      "Documentation for Documentation"
+    ]
+  },
+  "framework_info": [
+    "Django",
+    "FastAPI",
+    "Fastapi",
+    "Flask"
+  ],
+  "file_statistics": {
+    "total_files": 186,
+    "extensions": {
+      "(no extension)": 131,
+      "yml": 1,
+      "md": 7,
+      "txt": 1,
+      "sample": 13,
+      "idx": 1,
+      "pack": 1,
+      "tag": 1,
+      "py": 29,
+      "json": 1
+    },
+    "doc_files": 9
+  }
+}

@@ -3,81 +3,101 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ## Overview
-Docpilot is a powerful API service that leverages the capabilities of FastAPI to analyze code and generate relevant documentation. With its modular architecture and agent-based system, users can efficiently utilize a range of functionalities pertaining to software documentation. The service comes equipped with example scripts to help you get started quickly and includes a robust testing suite to ensure reliability and performance.
+Docpilot is a robust FastAPI application designed for document generation and analysis through an agent-based architecture. It provides various modules that collaborate to enable seamless integration with GitHub APIs, analysis of code, and generation of documentation. Additionally, Docpilot includes example scripts and comprehensive testing to ensure reliability and facilitate easy onboarding for developers.
+
+## Table of Contents
+- [Installation](#installation)  
+- [Usage](#usage)  
+- [Examples](#examples)  
+- [API](#api)  
+- [Configuration](#configuration)  
+- [Troubleshooting](#troubleshooting)  
+- [Contributing](#contributing)  
+- [License](#license)
 
 ## Installation
-To install Docpilot, follow the steps below:
+To get started with Docpilot, follow these steps:  
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/yourusername/docpilot.git
-   cd docpilot
-   ```
+1. **Clone the repository**:  
+   ```bash  
+   git clone https://github.com/yourusername/docpilot.git  
+   cd docpilot  
+   ```  
 
-2. **Set up a virtual environment (optional but recommended)**:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate # On Windows use `venv\Scripts\activate`
-   ```
+2. **Set up a virtual environment (optional but recommended)**:  
+   ```bash  
+   python -m venv venv  
+   source venv/bin/activate # On Windows use `venv\Scripts\activate`  
+   ```  
 
-3. **Install the required dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. **Install the required dependencies**:  
+   ```bash  
+   pip install -r requirements.txt  
+   ```  
 
-4. **Run the application**:
-   ```bash
-   uvicorn main:app --reload
-   ```
+4. **Run the application**:  
+   ```bash  
+   uvicorn src.api.app:app --reload  
+   ```  
+   Note: Ensure that `uvicorn` is installed as part of the requirements, and the entry point is correctly pointed to your FastAPI application.
 
 ## Usage
-To use the Docpilot API, you can start by sending HTTP requests to the endpoints provided by the FastAPI application. Some common scenarios include:
+Once the application is running, you can interact with the Docpilot API by sending HTTP requests. Here are a couple of common scenarios:  
 
-- Analyzing code:
-   ```bash
-   curl -X POST "http://localhost:8000/analyze" -H "Content-Type: application/json" -d '{"code": "print('Hello, World!')"}'
-   ```
-- Generating documentation:
-   ```bash
-   curl -X POST "http://localhost:8000/generate-doc" -H "Content-Type: application/json" -d '{"project": "my_project"}'
-   ```
+- **Analyzing code**:  
+   ```bash  
+   curl -X POST "http://localhost:8000/analyze" -H "Content-Type: application/json" -d '{"code": "print('Hello, World!')"}'  
+   ```  
+
+- **Generating documentation**:  
+   ```bash  
+   curl -X POST "http://localhost:8000/generate-doc" -H "Content-Type: application/json" -d '{"project": "my_project"}'  
+   ```  
+
+Explore other functionalities by checking the API documentation included in the `docs` directory.
 
 ## Examples
-The `examples` directory contains scripts that demonstrate how to interact with the API:
+In the `examples` directory, you will find a variety of scripts demonstrating how to work with the Docpilot API:  
 
-- `example_analyze.py`: Shows how to analyze a piece of code.
-- `example_generate_doc.py`: Illustrates the documentation generation process.
+- `api_doc_example.py`: Example of generating API documentation.  
+- `greeting_example.py`: A sample illustrating a simple greeting functionality.  
+- `repo_analyzer_example.py`: Shows how to analyze a GitHub repository.  
 
-You can run these examples directly after activating your environment:
-```bash
-python examples/example_analyze.py
-python examples/example_generate_doc.py
+Run these examples directly after activating your environment:  
+```bash  
+python examples/api_doc_example.py  
+python examples/greeting_example.py  
+python examples/repo_analyzer_example.py  
 ```
 
 ## API
-### Endpoints
-- **POST /analyze**: Analyzes the provided code snippet.
-  - **Request Body**: `{ "code": "<your_code_here>" }`
-  - **Response**: Analysis result in JSON format.
+### Endpoints  
+- **POST /analyze**: Analyzes the provided code snippet.  
+  - **Request Body**: `{ "code": "<your_code_here>" }`  
+  - **Response**: JSON containing analysis results.  
 
-- **POST /generate-doc**: Generates documentation based on the project name provided.
-  - **Request Body**: `{ "project": "<project_name>" }`
-  - **Response**: Documentation in JSON format containing generated details.
+- **POST /generate-doc**: Generates documentation for the specified project.  
+  - **Request Body**: `{ "project": "<project_name>" }`  
+  - **Response**: JSON with generated documentation details.
 
 ## Configuration
-Docpilot can be configured through environment variables or direct modifications inside the configuration file. Here are some configuration options:
+You can configure Docpilot using environment variables or directly in the configuration files. Here are some options:  
+- **API_HOST**: Set the host address for the API service.  
+- **API_PORT**: Set the port for the API service to listen on (default: 8000).  
+- **DEBUG_MODE**: Adjust log output verbosity for debugging purposes.
 
-- **API_HOST**: Define the host address for the API service.
-- **API_PORT**: Define the port on which the API service runs.
-- **DEBUG_MODE**: Enable or disable debug mode for more verbose logging.
+## Troubleshooting
+If you encounter issues while using Docpilot, consider these troubleshooting steps:  
+- **Application won't start**: Check for any errors in the terminal output when running `uvicorn`. Make sure all dependencies are installed accurately.  
+- **API requests fail**: Ensure that you are sending requests to the correct endpoint and that the server is up and running. Validate the request body formatting and required fields.
 
 ## Contributing
-Contributions to Docpilot are welcome! To contribute:
-1. Fork the repository and create a new branch for your feature/fix.
-2. Make your changes and test thoroughly.
-3. Submit a pull request detailing your changes and the issues addressed.
+We welcome contributions to Docpilot! Here’s how you can contribute:  
+1. Fork this repository and create a new branch for your feature or fix.  
+2. Make your changes and run tests to ensure nothing is broken.  
+3. Submit a pull request explaining your modifications and the goal of the changes.  
 
-Please make sure to follow the coding conventions and to write test cases for new functionalities where applicable.
+**Note**: Please adhere to coding standards and provide test cases for any new functionalities.
 
 ## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+Docpilot is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
