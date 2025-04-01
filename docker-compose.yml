@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    command: uvicorn src.app:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://docpilot:docpilot@db:5432/docpilot
+
+  db:
+    image: postgres:14
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=docpilot
+      - POSTGRES_USER=docpilot
+      - POSTGRES_DB=docpilot
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data: 
