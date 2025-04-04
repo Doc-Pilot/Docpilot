@@ -1,193 +1,109 @@
-# DocPilot User Guide
+# Docpilot: AI-Powered Documentation Generator
 
-DocPilot is an AI-powered tool that automatically generates and updates documentation for your code. This guide will help you get started with DocPilot and make the most of its features.
+Docpilot is an AI-powered documentation generator that analyzes your codebase and creates high-quality documentation, including READMEs, API documentation, and component documentation.
 
-## Table of Contents
+## Features
 
-- [Installation](#installation)
-- [Setting Up GitHub Integration](#setting-up-github-integration)
-- [How DocPilot Works](#how-docpilot-works)
-- [Supported Event Types](#supported-event-types)
-- [Documentation Types](#documentation-types)
-- [Customization](#customization)
-- [Troubleshooting](#troubleshooting)
-- [FAQ](#faq)
+- **Repository Analysis**: Automatically analyzes your codebase to identify programming languages, frameworks, entry points, and key components.
+- **README Generation**: Creates comprehensive README files with project descriptions, installation instructions, usage examples, and more.
+- **API Documentation**: Generates detailed API documentation for your endpoints, classes, and functions.
+- **Component Documentation**: Produces documentation for your UI components, including props, methods, and usage examples.
+- **Flexible Architecture**: Supports multiple LLM providers (OpenAI, Anthropic) and is designed for extensibility.
+- **CLI Interface**: Easy-to-use command line interface for generating documentation with various options.
 
 ## Installation
 
-### Option 1: GitHub App (Recommended)
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/docpilot.git
+cd docpilot
 
-1. Visit the GitHub Marketplace and search for "DocPilot"
-2. Click "Install it for free"
-3. Select the repositories you want DocPilot to have access to
-4. Complete the installation process
+# Install dependencies
+pip install -r requirements.txt
 
-### Option 2: Self-Hosting
-
-1. Clone the DocPilot repository:
-   ```bash
-   git clone https://github.com/yourusername/docpilot.git
-   cd docpilot
-   ```
-
-2. Set up environment variables:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys and settings
-   ```
-
-3. Start DocPilot with Docker:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Create a GitHub App and configure it to use your self-hosted instance
-   (See [Setting Up GitHub Integration](#setting-up-github-integration) for details)
-
-## Setting Up GitHub Integration
-
-### Creating a GitHub App
-
-1. Go to your GitHub account settings
-2. Navigate to "Developer settings" > "GitHub Apps" > "New GitHub App"
-3. Fill in the required information:
-   - Name: "DocPilot" (or your preferred name)
-   - Homepage URL: Your DocPilot instance URL or GitHub repo
-   - Webhook URL: `https://your-docpilot-instance.com/webhook/github`
-   - Webhook secret: Generate a secure random string
-   
-4. Set the required permissions:
-   - Repository permissions:
-     - Contents: Read & Write
-     - Pull requests: Read & Write
-     - Issues: Read & Write
-   
-5. Subscribe to events:
-   - Push
-   - Pull request
-   - Issues
-
-6. Create the app and note the App ID
-7. Generate a private key and download it
-8. Update your `.env` file with the App ID and path to the private key
-
-## How DocPilot Works
-
-DocPilot integrates with your GitHub workflow and automatically generates documentation based on code changes:
-
-1. **Push Events**: When code is pushed to the repository, DocPilot analyzes the changed files and updates or creates documentation accordingly.
-
-2. **Pull Request Events**: When a PR is opened or updated, DocPilot suggests documentation updates as comments.
-
-3. **Issue Events**: When an issue related to documentation is created or updated, DocPilot can suggest documentation improvements.
-
-## Supported Event Types
-
-DocPilot responds to the following GitHub events:
-
-### Push Events
-- Automatically updates documentation when code is pushed to the main branch
-- Creates/updates standalone documentation files in the `docs/` directory
-- Creates pull requests with documentation changes for review
-
-### Pull Request Events
-- Analyzes code changes in PRs
-- Adds comments with documentation suggestions
-- Highlights undocumented code or outdated documentation
-
-### Issue Events
-- Responds to issues labeled with "documentation"
-- Generates documentation for files mentioned in the issue
-- Suggests documentation improvements based on issue content
-
-## Documentation Types
-
-DocPilot supports multiple documentation formats:
-
-### Inline Documentation
-- **Python**: Docstrings (Google style, reST, or NumPy format)
-- **JavaScript/TypeScript**: JSDoc comments
-- **Java/Kotlin**: Javadoc comments
-- **Go**: GoDoc comments
-- **Ruby**: RDoc
-- **C/C++**: Doxygen
-
-### Standalone Documentation
-- **Markdown**: README files, API documentation, guides
-- **OpenAPI/Swagger**: For REST API documentation
-- **Reference documentation**: Function/class references
-
-## Customization
-
-### Configuration File
-
-Create a `.docpilot.yml` file in your repository root to customize DocPilot behavior:
-
-```yaml
-# .docpilot.yml
-docpilot:
-  # General settings
-  doc_style: google  # or 'numpy', 'rest', 'jsdoc'
-  
-  # Documentation directory
-  docs_dir: docs/
-  
-  # Branch settings
-  branches:
-    - main
-    - develop
-  
-  # File patterns to include/exclude
-  include:
-    - "src/**/*.py"
-    - "app/**/*.js"
-  exclude:
-    - "**/__test__/**"
-    - "**/vendor/**"
-    
-  # Custom documentation templates
-  templates:
-    function: |
-      /**
-       * {{function_name}}
-       * {{description}}
-       * @param {{{param_type}}} {{param_name}} - {{param_description}}
-       * @returns {{{return_type}}} {{return_description}}
-       */
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-## Troubleshooting
+## Usage
 
-### Common Issues
+### Command Line Interface
 
-#### Documentation Not Generating
-- Check that DocPilot has access to the repository
-- Verify that the file types are supported
-- Check for errors in the DocPilot logs
+Docpilot provides a command-line interface for generating documentation:
 
-#### PR Comments Not Appearing
-- Ensure DocPilot has the correct permissions
-- Check webhook delivery status in GitHub App settings
+```bash
+# Scan a repository
+python -m docpilot.cli scan <repo_path> [--output-dir=<dir>] [--exclude=<dirs>]
 
-#### Self-Hosted Instance Problems
-- Verify environment variables are correctly set
-- Ensure GitHub App is properly configured with the right webhook URL
-- Check that your instance is accessible from GitHub
+# Analyze a repository
+python -m docpilot.cli analyze <repo_path> [--output-dir=<dir>] [--exclude=<dirs>]
 
-## FAQ
+# Generate documentation
+python -m docpilot.cli docs <repo_path> [--output-dir=<dir>] [--exclude=<dirs>] [--readme] [--api] [--components] [--model=<model>] [--temperature=<temp>]
 
-### How does DocPilot handle existing documentation?
+# View metrics from a previous run
+python -m docpilot.cli metrics <metrics_file>
+```
 
-DocPilot tries to preserve existing documentation while suggesting improvements or additions. It will only update sections that are missing or outdated.
+### Using the OrchestratorAgent
 
-### Can I customize the AI model used?
+You can also use the `OrchestratorAgent` directly in your Python code:
 
-Yes, self-hosted instances can be configured to use different LLM providers by updating the settings.
+```python
+from docpilot.src.agents.orchestrator import OrchestratorAgent
 
-### Is my code secure?
+# Initialize the orchestrator
+agent = OrchestratorAgent()
 
-DocPilot only processes the code that's already on GitHub. For the GitHub App version, we never store your code permanently and all processing is done securely.
+# Run the complete workflow
+result = agent.run_workflow(
+    repo_path="path/to/your/repo",
+    output_dir="path/to/output",
+    excluded_dirs=[".git", "node_modules"],
+    docs_to_generate=["readme", "api", "component"]
+)
 
-### How much does it cost?
+# Or run individual steps
+scan_result = agent.scan_repository("path/to/your/repo")
+analysis_result = agent.analyze_repository()
+readme_result = agent.generate_readme()
+```
 
-Check our [pricing page](https://docpilot.ai/pricing) for the latest information on free and paid tiers. 
+### Example
+
+Check out the example script in `examples/orchestrator_example.py` for a complete usage example.
+
+## Architecture
+
+Docpilot uses a modular agent-based architecture:
+
+1. **BaseAgent**: Abstract base class providing common functionality for all agents.
+2. **OrchestratorAgent**: Coordinates the entire documentation workflow.
+3. **RepoAnalyzer**: Analyzes the repository structure and codebase.
+4. **ReadmeGenerator**: Generates README documentation.
+5. **APIDocGenerator**: Generates API documentation.
+6. **DocGenerator**: Generates component documentation.
+7. **CodeAnalyzer**: Performs deeper code analysis for better documentation.
+8. **QualityChecker**: Ensures documentation quality and completeness.
+
+### Workflow
+
+The typical documentation workflow follows these steps:
+
+1. Scan the repository to collect file information
+2. Analyze the repository structure and codebase
+3. Generate README documentation
+4. Generate API documentation for endpoints, classes, or functions
+5. Generate component documentation for UI components
+6. Perform quality checks and refinements
+
+## Configuration
+
+Docpilot can be configured through the environment variables in your `.env` file:
+
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `ANTHROPIC_API_KEY`: Your Anthropic API key
+- `LLM_PROVIDER`: Which LLM provider to use (openai or anthropic)
+- `LLM_MODEL`: The model to use (e.g., gpt-4, claude-3-opus)
+- `LLM_TEMPERATURE`: Temperature setting for generation (0.0-1.0)
