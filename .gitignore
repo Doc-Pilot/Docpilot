@@ -23,6 +23,7 @@ wheels/
 .pytest_cache/
 examples/output
 supporting_files/
+docs/
 
 # Environment
 .env
