@@ -48,5 +48,21 @@ class Settings(BaseModel):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings"""
+    """def get_settings() -> Settings:
+    """
+    Get cached settings.
+
+    This function retrieves the settings that have been cached using an
+    LRU (Least Recently Used) cache to optimize performance. The cached
+    settings can be used throughout the application to avoid repeated
+    computation and fetching of configuration values.
+
+    Returns:
+        Settings: An instance of the `Settings` class containing the
+        cached configuration values.
+
+    Example:
+        settings = get_settings()
+        print(settings.some_config_value)
+    """"""
     return Settings() 
