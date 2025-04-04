@@ -47,6 +47,6 @@ class Settings(BaseModel):
         env_file = ".env"
 
 @lru_cache()
-def get_settings() -> Settings:
+def get_settings():
     """Get cached settings"""
-    return Settings() 
+    return Settings()

@@ -1,54 +1,16 @@
 """
-DocPilot Agent Module
-=====================
+DocPilot Agents
+=============
 
-This module provides AI agent classes for code analysis, documentation generation,
-and quality checking of documentation.
+This module provides the core agents for documentation generation following the Diátaxis framework.
 """
 
-from .base import BaseAgent, AgentConfig, AgentResult, RunContext
-from .code_analyzer import CodeAnalyzer, CodeElement, CodeAnalysisResult, DocstringResult, ComplexityResult
-from .doc_generator import DocGenerator, DocGeneratorInput, DocumentationResult, ExamplesResult, ImprovementsResult
-from .quality_checker import QualityChecker, QualityCheckInput, QualityResult, QualityIssue, CompletenessResult, ConsistencyResult
-from .repo_analyzer import RepoAnalyzer, RepoStructureInput, RepoStructureResult, MarkdownSummaryResult, FileNode, DirectoryNode, RepoComponent
-from .api_doc_generator import APIDocGenerator, APIDocInput, APIDocResult, APIEndpoint, APIExamplesResult
-from .readme_generator import ReadmeGenerator, ReadmeInput, ReadmeResult, ReadmeSection
+from .base import BaseAgent, AgentConfig, AgentResult
+
 
 __all__ = [
+    # Base classes
     'BaseAgent',
     'AgentConfig',
-    'AgentResult',
-    'RunContext',
-    'CodeAnalyzer',
-    'CodeElement',
-    'CodeAnalysisResult',
-    'DocstringResult',
-    'ComplexityResult',
-    'DocGenerator',
-    'DocGeneratorInput',
-    'DocumentationResult',
-    'ExamplesResult',
-    'ImprovementsResult',
-    'QualityChecker',
-    'QualityCheckInput',
-    'QualityResult',
-    'QualityIssue',
-    'CompletenessResult',
-    'ConsistencyResult',
-    'RepoAnalyzer',
-    'RepoStructureInput',
-    'RepoStructureResult',
-    'MarkdownSummaryResult',
-    'FileNode',
-    'DirectoryNode',
-    'RepoComponent',
-    'APIDocGenerator',
-    'APIDocInput',
-    'APIDocResult',
-    'APIEndpoint',
-    'APIExamplesResult',
-    'ReadmeGenerator',
-    'ReadmeInput',
-    'ReadmeResult',
-    'ReadmeSection'
-] 
+    'AgentResult'
+]

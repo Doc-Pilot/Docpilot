@@ -6,9 +6,9 @@ This module provides utilities for tracking and calculating token usage and cost
 for Large Language Model interactions.
 """
 
-from typing import Any, Dict, Optional, Union
+from typing import Any
 from pydantic import BaseModel, Field
-from ..utils.logging import logger
+from .logging import logger
 
 class ModelCosts(BaseModel):
     """Defines cost structure for different LLM models"""
@@ -155,11 +155,11 @@ def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage
     
     Returns a standardized Usage object with the extracted information.
     """
+    # Initialize with default values - ensure we always return a valid Usage object
     usage = Usage(model=model_name)
     
-    # Return empty usage if no result
+    # Return default usage if no result
     if result is None:
-        logger.warning("No result provided to extract_usage_from_result")
         return usage
     
     try:
@@ -169,7 +169,6 @@ def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage
             
             # Validate that we have a usage object with the expected fields
             if usage_data is None:
-                logger.warning("Result has usage method but it returned None")
                 return usage
             
             # Map the Pydantic AI usage fields to our Usage object fields
@@ -189,28 +188,14 @@ def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage
             # Calculate the cost based on the token counts and model - for this individual result
             if usage.total_tokens > 0:
                 usage.calculate_cost(model_name)
-                logger.debug(
-                    f"Extracted usage metrics", 
-                    prompt_tokens=usage.prompt_tokens,
-                    completion_tokens=usage.completion_tokens,
-                    total_tokens=usage.total_tokens,
-                    cost=usage.cost,
-                    model=model_name
-                )
             else:
-                logger.warning(
-                    f"Zero tokens in usage data", 
-                    model=model_name,
-                    usage_data=str(usage_data)
-                )
-        else:
-            logger.warning("Result has no callable usage method")
+                # Only log real issues, not expected cases
+                if usage_data and (hasattr(usage_data, "request_tokens") or hasattr(usage_data, "response_tokens")):
+                    logger.warning(f"Zero tokens reported in usage data for {model_name}")
     
     except Exception as e:
-        logger.error(
-            f"Error extracting usage from result: {e}",
-            model=model_name,
-            error_type=type(e).__name__
-        )
+        # Only log actual exceptions
+        logger.error(f"Failed to extract usage metrics: {e}")
     
+    # Ensure we return a valid Usage object
     return usage
