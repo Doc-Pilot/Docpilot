@@ -1,12 +1,11 @@
 """
-Repository Scanner Utility
-=========================
+Repository Scanner Module
+========================
 
-This utility provides functions for scanning repository file structures
-and identifying patterns.
+This module contains utilities for scanning repositories and analyzing their structure.
+It provides a hierarchical representation of the repository optimized for LLM understanding.
 """
 
-# Importing Dependencies
 import os
 import re
 import fnmatch
@@ -17,7 +16,9 @@ import pathspec
 logger = logging.getLogger(__name__)
 
 class RepoScanner:
-    """Scans a repository and provides information about its structure"""
+    """
+    Scans repositories and provides analysis of their structure.
+    """
     
     def __init__(
         self,
@@ -27,7 +28,7 @@ class RepoScanner:
         use_gitignore: bool = True
     ):
         """
-        Initialize the repository scanner
+        Initialize the repository scanner.
         
         Args:
             repo_path: Path to the repository
@@ -79,12 +80,12 @@ class RepoScanner:
         
     def scan_files(self) -> List[str]:
         """
-        Scan the repository and return a list of file paths
+        Get all files in the repository, respecting exclude patterns.
         
         Returns:
-            List of file paths relative to repo_path
+            List of file paths relative to the repository root
         """
-        file_list = []
+        all_files = []
         
         for root, dirs, files in os.walk(self.repo_path):
             # Skip directories matching gitignore patterns
@@ -97,21 +98,228 @@ class RepoScanner:
                         dirs.remove(d)
             
             for file in files:
-                full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, self.repo_path)
+                file_path = os.path.join(root, file)
+                rel_path = os.path.relpath(file_path, self.repo_path)
+                rel_path = rel_path.replace('\\', '/')  # Normalize path separators
                 
-                # Check if the file should be included
-                if self._should_include_file(rel_path):
-                    file_list.append(rel_path)
+                # Check if file should be excluded
+                exclude = False
+                for pattern in self.exclude_patterns:
+                    if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(file, pattern):
+                        exclude = True
+                        break
+                
+                if not exclude:
+                    all_files.append(rel_path)
         
-        return file_list
+        return all_files
     
-    def _should_include_file(self, file_path: str) -> bool:
+    def detect_frameworks(self) -> Dict[str, Set[str]]:
         """
-        Check if a file should be included based on include/exclude patterns
+        Detect frameworks and technologies used in the repository.
+        
+        Returns:
+            Dictionary of technology categories and detected technologies
+        """
+        # Get all files
+        files = self.get_all_files()
+        
+        # Define patterns for technology detection
+        technology_patterns = {
+            "frontend": {
+                "react": ["react", "jsx", "react-dom", "react-router"],
+                "vue": ["vue", "vuex", "vue-router"],
+                "angular": ["angular", "@angular", "ng-"],
+                "svelte": ["svelte"],
+                "nextjs": ["next", "next.js"],
+                "nuxt": ["nuxt"],
+                "bootstrap": ["bootstrap"],
+                "tailwind": ["tailwind"],
+                "material-ui": ["material-ui", "@mui"],
+                "jquery": ["jquery"],
+            },
+            "backend": {
+                "express": ["express"],
+                "django": ["django", "wsgi"],
+                "flask": ["flask"],
+                "fastapi": ["fastapi"],
+                "spring": ["spring", "springframework"],
+                "laravel": ["laravel"],
+                "rails": ["rails"],
+                "aspnet": ["asp.net", "aspnetcore"],
+                "nestjs": ["nest", "@nestjs"],
+                "graphql": ["graphql", "apollo"],
+            },
+            "database": {
+                "mongodb": ["mongo", "mongodb"],
+                "postgresql": ["postgres", "postgresql"],
+                "mysql": ["mysql"],
+                "sqlite": ["sqlite"],
+                "redis": ["redis"],
+                "firebase": ["firebase", "firestore"],
+                "dynamodb": ["dynamodb"],
+                "cassandra": ["cassandra"],
+                "elasticsearch": ["elasticsearch"],
+                "prisma": ["prisma"],
+                "sequelize": ["sequelize"],
+                "typeorm": ["typeorm"],
+            },
+            "testing": {
+                "jest": ["jest"],
+                "mocha": ["mocha"],
+                "pytest": ["pytest"],
+                "unittest": ["unittest"],
+                "jasmine": ["jasmine"],
+                "chai": ["chai"],
+                "cypress": ["cypress"],
+                "selenium": ["selenium"],
+                "junit": ["junit"],
+            },
+            "devops": {
+                "docker": ["docker", "dockerfile"],
+                "kubernetes": ["kubernetes", "k8s"],
+                "jenkins": ["jenkins", "jenkinsfile"],
+                "terraform": ["terraform"],
+                "ansible": ["ansible"],
+                "github-actions": ["github-actions", "github/workflows"],
+                "gitlab-ci": ["gitlab-ci"],
+                "ci-cd": ["ci", "cd", "ci/cd"],
+                "aws": ["aws", "amazon web services"],
+                "azure": ["azure"],
+                "gcp": ["gcp", "google cloud"],
+            },
+            "state-management": {
+                "redux": ["redux"],
+                "mobx": ["mobx"],
+                "vuex": ["vuex"],
+                "ngrx": ["ngrx"],
+                "zustand": ["zustand"],
+                "jotai": ["jotai"],
+                "recoil": ["recoil"],
+            },
+            "languages": {
+                "typescript": ["typescript", ".ts"],
+                "javascript": [".js", "javascript"],
+                "python": [".py", "python"],
+                "java": [".java", "java"],
+                "go": [".go", "golang"],
+                "rust": [".rs", "rust"],
+                "c-sharp": [".cs", "c#"],
+                "ruby": [".rb", "ruby"],
+                "php": [".php", "php"],
+                "kotlin": [".kt", "kotlin"],
+                "swift": [".swift", "swift"],
+            },
+        }
+        
+        # Get file contents for key files to improve detection accuracy
+        config_files = []
+        for file in files:
+            filename = os.path.basename(file)
+            if filename in [
+                "package.json",
+                "requirements.txt",
+                "Pipfile",
+                "pom.xml",
+                "build.gradle",
+                "Cargo.toml",
+                "Gemfile",
+                "composer.json",
+                "go.mod",
+                "docker-compose.yml",
+                "Dockerfile",
+                ".travis.yml",
+                ".gitlab-ci.yml",
+                "webpack.config.js",
+                "tsconfig.json"
+            ]:
+                config_files.append(file)
+        
+        # Read content of key config files
+        config_contents = {}
+        for file in config_files:
+            try:
+                file_path = os.path.join(self.repo_path, file)
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    config_contents[file] = f.read()
+            except Exception:
+                # Ignore errors when reading files
+                pass
+        
+        # Detect technologies
+        technologies = defaultdict(set)
+        
+        # Detect from config contents
+        for file_name, content in config_contents.items():
+            for category, techs in technology_patterns.items():
+                for tech, patterns in techs.items():
+                    for pattern in patterns:
+                        if re.search(pattern, content, re.IGNORECASE):
+                            technologies[category].add(tech)
+        
+        # Detect from file names and extensions
+        for file in files:
+            file_lower = file.lower()
+            for category, techs in technology_patterns.items():
+                for tech, patterns in techs.items():
+                    for pattern in patterns:
+                        if pattern.startswith('.'):
+                            if file_lower.endswith(pattern):
+                                technologies[category].add(tech)
+                        elif re.search(pattern, file_lower, re.IGNORECASE):
+                            technologies[category].add(tech)
+        
+        # Make additional inferences based on detected technologies
+        if technologies["frontend"] & {"react", "vue", "angular", "svelte"} and \
+           technologies["backend"] & {"express", "django", "flask", "fastapi", "spring", "nestjs"}:
+            technologies["architecture"].add("full-stack")
+        
+        if technologies["database"] and technologies["backend"]:
+            technologies["architecture"].add("data-driven")
+        
+        if {"typescript"} & technologies["languages"]:
+            technologies["practices"].add("static-typing")
+        
+        return technologies
+    
+    def create_directory_tree(self) -> Dict[str, Any]:
+        """
+        Create a hierarchical directory tree representation of the repository.
+        
+        Returns:
+            Dictionary representing the repository directory structure
+        """
+        files = self.get_all_files()
+        
+        # Create a tree structure
+        tree = {}
+        
+        for file_path in files:
+            parts = file_path.split('/')
+            current = tree
+            
+            # Build the tree structure
+            for i, part in enumerate(parts):
+                if i == len(parts) - 1:  # This is a file
+                    if "files" not in current:
+                        current["files"] = []
+                    current["files"].append(part)
+                else:  # This is a directory
+                    if "dirs" not in current:
+                        current["dirs"] = {}
+                    if part not in current["dirs"]:
+                        current["dirs"][part] = {}
+                    current = current["dirs"][part]
+        
+        # Sort the tree
+        return self._sort_tree(tree)
+    
+    def _sort_tree(self, tree: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sort the directory tree with directories first, followed by files, both alphabetically.
         
         Args:
-            file_path: File path to check
+            tree: Tree structure to sort
             
         Returns:
             True if the file should be included, False otherwise
@@ -138,280 +346,281 @@ class RepoScanner:
     
     def get_file_extension_breakdown(self, file_list: List[str]) -> Dict[str, int]:
         """
-        Get a breakdown of file extensions in the repository
+        Group related files based on naming patterns and directory structure.
         
         Args:
-            file_list: List of file paths
+            files: List of file paths
             
         Returns:
-            Dictionary mapping extensions to counts
+            Dictionary of base names and related files
         """
-        extension_counts = {}
+        related_files = defaultdict(list)
         
-        for file_path in file_list:
-            _, ext = os.path.splitext(file_path)
-            if ext:
-                # Remove the dot and convert to lowercase
-                ext = ext[1:].lower()
-                extension_counts[ext] = extension_counts.get(ext, 0) + 1
+        # Group by common base name
+        for file_path in files:
+            filename = os.path.basename(file_path)
+            name, ext = os.path.splitext(filename)
+            
+            # Handle special cases like index.js, README.md, etc.
+            if name.lower() in ["index", "readme", "main", "app"]:
+                dir_path = os.path.dirname(file_path)
+                base_dir = os.path.basename(dir_path) if dir_path else "root"
+                related_files[f"{base_dir}_{name}"].append(file_path)
             else:
-                # No extension
-                extension_counts["(no extension)"] = extension_counts.get("(no extension)", 0) + 1
+                # Handle file pairs like Component.js and Component.test.js
+                # Strip .test, .spec, etc., to group related files
+                base_name = re.sub(r'\.(test|spec|e2e|unit|integration|mock)$', '', name)
+                related_files[base_name].append(file_path)
         
-        return extension_counts
+        return dict(related_files)
     
-    def identify_language(self, file_path: str) -> Optional[str]:
+    def identify_modules(self, files: List[str]) -> Dict[str, List[str]]:
         """
-        Identify the programming language of a file based on its extension
+        Identify logical modules or components in the repository.
         
         Args:
-            file_path: Path to the file
+            files: List of file paths
             
         Returns:
-            Identified language or None if unknown
+            Dictionary of module names and their files
         """
-        _, ext = os.path.splitext(file_path)
-        if not ext:
-            return None
-            
-        # Remove the dot and convert to lowercase
-        ext = ext[1:].lower()
+        modules = defaultdict(list)
         
-        # Map extensions to languages
-        extension_to_language = {
-            "py": "Python",
-            "js": "JavaScript",
-            "jsx": "JavaScript (React)",
-            "ts": "TypeScript",
-            "tsx": "TypeScript (React)",
-            "html": "HTML",
-            "css": "CSS",
-            "scss": "SCSS",
-            "sass": "Sass",
-            "less": "Less",
-            "java": "Java",
-            "c": "C",
-            "cpp": "C++",
-            "cc": "C++",
-            "cxx": "C++",
-            "h": "C/C++ Header",
-            "hpp": "C++ Header",
-            "cs": "C#",
-            "go": "Go",
-            "rb": "Ruby",
-            "php": "PHP",
-            "swift": "Swift",
-            "kt": "Kotlin",
-            "kts": "Kotlin Script",
-            "rs": "Rust",
-            "sh": "Shell",
-            "bat": "Batch",
-            "ps1": "PowerShell",
-            "sql": "SQL",
-            "md": "Markdown",
-            "json": "JSON",
-            "yaml": "YAML",
-            "yml": "YAML",
-            "toml": "TOML",
-            "xml": "XML",
-            "csv": "CSV",
-            "txt": "Text",
-            "gitignore": "GitIgnore",
-            "dockerfile": "Dockerfile",
-            "lock": "Lockfile",
+        # Common module indicators in path
+        module_indicators = [
+            "src",
+            "lib",
+            "app",
+            "components",
+            "modules",
+            "services",
+            "controllers",
+            "models",
+            "views",
+            "util",
+            "utils",
+            "helpers",
+            "api"
+        ]
+        
+        for file_path in files:
+            parts = file_path.split('/')
+            
+            # Detect modules based on directory structure
+            for i, part in enumerate(parts[:-1]):  # Skip the filename
+                if part.lower() in module_indicators:
+                    # If this is a module indicator and there's a next part (submodule)
+                    if i + 1 < len(parts) - 1:
+                        modules[parts[i+1]].append(file_path)
+                        break
+                    else:
+                        # No submodule, so this file belongs directly to the module
+                        modules[part].append(file_path)
+                        break
+            
+            # If no module was detected, put in the top-level directory
+            if file_path not in [f for module_files in modules.values() for f in module_files]:
+                if len(parts) > 1:
+                    modules[parts[0]].append(file_path)
+                else:
+                    modules["root"].append(file_path)
+        
+        return dict(modules)
+    
+    def collect_file_samples(self, files: List[str]) -> Dict[str, List[str]]:
+        """
+        Collect representative file samples from different parts of the repository.
+        
+        Args:
+            files: List of file paths
+            
+        Returns:
+            Dictionary of sample categories and sample file paths
+        """
+        samples = {
+            "important": [],
+            "source_code": [],
+            "config": [],
+            "documentation": [],
         }
         
-        return extension_to_language.get(ext)
+        # Important files that should always be included
+        important_files = [
+            "package.json",
+            "requirements.txt",
+            "Pipfile",
+            "pom.xml",
+            "build.gradle",
+            "Cargo.toml",
+            "Gemfile",
+            "composer.json",
+            "go.mod",
+            "docker-compose.yml",
+            "Dockerfile",
+            ".travis.yml",
+            ".gitlab-ci.yml",
+            "webpack.config.js",
+            "tsconfig.json",
+            "README.md",
+            "LICENSE",
+            ".env.example",
+            "setup.py",
+            "pyproject.toml",
+            "manage.py",
+            "app.py",
+            "main.py",
+            "index.js",
+            "server.js",
+        ]
+        
+        # Find important files
+        for file in files:
+            filename = os.path.basename(file)
+            if filename in important_files:
+                samples["important"].append(file)
+        
+        # Source code files
+        source_extensions = [
+            ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rb", ".rs", ".c", ".cpp", ".cs", ".php", ".swift", ".kt"
+        ]
+        
+        for file in files:
+            _, ext = os.path.splitext(file)
+            if ext in source_extensions:
+                # Avoid test files
+                if not re.search(r'(test|spec|e2e)', file.lower()):
+                    samples["source_code"].append(file)
+        
+        # Limit the number of source code samples to avoid overwhelming
+        if len(samples["source_code"]) > 20:
+            # Take a diverse sample
+            by_ext = defaultdict(list)
+            for file in samples["source_code"]:
+                _, ext = os.path.splitext(file)
+                by_ext[ext].append(file)
+            
+            # Take up to 5 samples from each extension
+            diverse_sample = []
+            for ext_files in by_ext.values():
+                diverse_sample.extend(ext_files[:5])
+            
+            # Limit to 20 total
+            samples["source_code"] = diverse_sample[:20]
+        
+        # Config files
+        config_extensions = [
+            ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf"
+        ]
+        
+        for file in files:
+            _, ext = os.path.splitext(file)
+            if ext in config_extensions:
+                samples["config"].append(file)
+        
+        # Documentation files
+        doc_extensions = [
+            ".md", ".rst", ".txt", ".pdf", ".doc", ".docx"
+        ]
+        
+        for file in files:
+            _, ext = os.path.splitext(file)
+            if ext in doc_extensions:
+                samples["documentation"].append(file)
+        
+        return samples
     
-    def detect_framework_patterns(self, file_list: List[str]) -> List[str]:
+    def analyze_languages(self, files: List[str]) -> Dict[str, int]:
         """
-        Detect framework patterns in the repository
+        Analyze programming languages used in the repository.
         
         Args:
-            file_list: List of file paths
+            files: List of file paths
             
         Returns:
-            List of detected frameworks
+            Dictionary of language names and file counts
         """
-        frameworks = set()
-        
-        # Look for framework-specific files
-        framework_patterns = {
-            "react": ["package.json"],
-            "vue": ["package.json"],
-            "angular": ["angular.json", "package.json"],
-            "django": ["manage.py", "settings.py"],
-            "flask": ["app.py", "wsgi.py"],
-            "fastapi": ["main.py", "app.py"],
-            "express": ["package.json"],
-            "spring": ["pom.xml", "build.gradle"],
-            "rails": ["Gemfile", "config/routes.rb"],
-            "laravel": ["composer.json", "artisan"],
-            "next.js": ["next.config.js", "package.json"],
-            "gatsby": ["gatsby-config.js", "package.json"],
-            "nuxt.js": ["nuxt.config.js", "package.json"]
+        extension_map = {
+            ".py": "Python",
+            ".js": "JavaScript",
+            ".ts": "TypeScript",
+            ".jsx": "React",
+            ".tsx": "React/TypeScript",
+            ".java": "Java",
+            ".go": "Go",
+            ".rb": "Ruby",
+            ".rs": "Rust",
+            ".c": "C",
+            ".cpp": "C++",
+            ".cs": "C#",
+            ".php": "PHP",
+            ".swift": "Swift",
+            ".kt": "Kotlin",
+            ".scala": "Scala",
+            ".sh": "Shell",
+            ".html": "HTML",
+            ".css": "CSS",
+            ".scss": "SCSS",
+            ".sass": "SASS",
+            ".less": "LESS",
+            ".sql": "SQL",
+            ".graphql": "GraphQL",
+            ".md": "Markdown",
+            ".json": "JSON",
+            ".yaml": "YAML",
+            ".yml": "YAML",
+            ".toml": "TOML",
         }
         
-        # Check for presence of framework-specific files
-        for file_path in file_list:
-            # Extract just the filename without directory
-            filename = os.path.basename(file_path)
-            
-            for framework, patterns in framework_patterns.items():
-                for pattern in patterns:
-                    if filename == pattern:
-                        # For package.json and similar, we need to check the content
-                        if filename == "package.json":
-                            # Read the file and check for dependencies
-                            try:
-                                import json
-                                full_path = os.path.join(self.repo_path, file_path)
-                                with open(full_path, 'r') as f:
-                                    package_data = json.load(f)
-                                    
-                                # Check dependencies and devDependencies
-                                dependencies = package_data.get('dependencies', {})
-                                dev_dependencies = package_data.get('devDependencies', {})
-                                all_deps = {**dependencies, **dev_dependencies}
-                                
-                                # Check for specific frameworks
-                                if 'react' in all_deps:
-                                    frameworks.add('React')
-                                if 'vue' in all_deps:
-                                    frameworks.add('Vue.js')
-                                if '@angular/core' in all_deps:
-                                    frameworks.add('Angular')
-                                if 'express' in all_deps:
-                                    frameworks.add('Express.js')
-                                if 'next' in all_deps:
-                                    frameworks.add('Next.js')
-                                if 'gatsby' in all_deps:
-                                    frameworks.add('Gatsby')
-                                if 'nuxt' in all_deps:
-                                    frameworks.add('Nuxt.js')
-                            except:
-                                pass
-                        else:
-                            # For other files, just the presence is enough
-                            frameworks.add(framework.capitalize())
+        language_counts = Counter()
+        extension_counts = Counter()
         
-        # If Django patterns are found in Python files
-        django_patterns = [
-            r'from django',
-            r'import django',
-        ]
+        for file in files:
+            _, ext = os.path.splitext(file)
+            if ext:
+                ext = ext.lower()
+                extension_counts[ext] += 1
+                language = extension_map.get(ext, "Other")
+                language_counts[language] += 1
         
-        flask_patterns = [
-            r'from flask import',
-            r'import flask',
-        ]
-        
-        fastapi_patterns = [
-            r'from fastapi import',
-            r'import fastapi',
-        ]
-        
-        # Check Python files for these patterns
-        for file_path in file_list:
-            if file_path.endswith('.py'):
-                try:
-                    full_path = os.path.join(self.repo_path, file_path)
-                    with open(full_path, 'r') as f:
-                        content = f.read()
-                        
-                    for pattern in django_patterns:
-                        if re.search(pattern, content):
-                            frameworks.add('Django')
-                            break
-                            
-                    for pattern in flask_patterns:
-                        if re.search(pattern, content):
-                            frameworks.add('Flask')
-                            break
-                            
-                    for pattern in fastapi_patterns:
-                        if re.search(pattern, content):
-                            frameworks.add('FastAPI')
-                            break
-                except:
-                    pass
-        
-        return sorted(list(frameworks))
+        return dict(language_counts), dict(extension_counts)
     
-    def identify_documentation_files(self, file_list: List[str]) -> List[str]:
+    def analyze_repository(self) -> Dict[str, Any]:
         """
-        Identify documentation files in the repository
+        Perform a comprehensive analysis of the repository.
         
-        Args:
-            file_list: List of file paths
-            
         Returns:
-            List of documentation file paths
+            Dictionary containing analysis results
         """
-        doc_files = []
+        # Get all files
+        files = self.get_all_files()
         
-        # Common documentation file patterns
-        doc_patterns = [
-            "*.md",
-            "*.rst",
-            "*.txt",
-            "*/docs/*",
-            "*/doc/*",
-            "*/documentation/*",
-            "*/wiki/*",
-            "*.pdf",
-            "README*",
-            "CHANGELOG*",
-            "CONTRIBUTING*",
-            "LICENSE*",
-            "NOTICE*",
-            "AUTHORS*"
-        ]
+        # Detect frameworks and technologies
+        technologies = self.detect_frameworks()
         
-        for file_path in file_list:
-            # Convert Windows path separators to Unix style for pattern matching
-            unix_path = file_path.replace('\\', '/')
-            
-            for pattern in doc_patterns:
-                if fnmatch.fnmatch(unix_path, pattern):
-                    doc_files.append(file_path)
-                    break
+        # Create directory tree
+        directory_tree = self.create_directory_tree()
         
-        return doc_files
-    
-    def identify_entry_points(self, file_list: List[str]) -> List[str]:
-        """
-        Identify potential entry points in the repository
+        # Find related files
+        related_files = self.find_related_files(files)
         
-        Args:
-            file_list: List of file paths
-            
-        Returns:
-            List of entry point file paths
-        """
-        entry_points = []
+        # Identify modules
+        modules = self.identify_modules(files)
         
-        # Common entry point file patterns
-        entry_patterns = {
-            "Python": ["main.py", "app.py", "manage.py", "setup.py", "__main__.py"],
-            "JavaScript": ["index.js", "main.js", "app.js", "server.js"],
-            "TypeScript": ["index.ts", "main.ts", "app.ts", "server.ts"],
-            "Java": ["Main.java", "App.java", "Application.java"],
-            "Go": ["main.go"],
-            "Ruby": ["main.rb", "app.rb", "application.rb"],
-            "PHP": ["index.php"],
-            "Rust": ["main.rs"],
-            "C#": ["Program.cs"],
-            "C/C++": ["main.c", "main.cpp"]
-        }
+        # Collect file samples
+        file_samples = self.collect_file_samples(files)
         
-        for file_path in file_list:
-            # Extract filename
-            filename = os.path.basename(file_path)
-            
-            # Check against entry patterns
-            for language, patterns in entry_patterns.items():
-                if filename in patterns:
-                    entry_points.append(file_path)
+        # Analyze languages
+        languages, extension_breakdown = self.analyze_languages(files)
         
-        return entry_points 
+        # Return analysis results
+        return {
+            "file_paths": files,
+            "file_count": len(files),
+            "technologies": technologies,
+            "directory_tree": directory_tree,
+            "related_files": related_files,
+            "modules": modules,
+            "file_samples": file_samples,
+            "languages": languages,
+            "extension_breakdown": extension_breakdown
+        } 
