@@ -1,143 +1,233 @@
-# Importing Dependencies
+"""
+Base Agent Module
+================
+
+This module provides the base agent class using Pydantic AI's Agent framework,
+with typed dependencies and structured results.
+"""
+
 from dataclasses import dataclass
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field
-from typing import TypeVar, Generic, Optional, Dict, Any, Callable, Type, Union
+from typing import TypeVar, Generic, Optional, Dict, Any, Callable, Type, ClassVar, AsyncGenerator
 from ..utils.logging import logger
+from ..utils.metrics import Usage, extract_usage_from_result
 from ..utils.config import get_settings
 
-# Define a single generic type for both dependencies and results
-ModelType = TypeVar('ModelType')
+# Define types for dependency injection and results
+DepsT = TypeVar('DepsT')
+ResultT = TypeVar('ResultT', bound=BaseModel)
+
+# Settings
+settings = get_settings()
 
 @dataclass
 class AgentConfig:
     """Configuration for AI agents"""
-    def __init__(self):
-        settings = get_settings()
-        self.model_name = settings.default_model
-        self.temperature = settings.model_temperature
-        self.max_tokens = settings.max_tokens
-        self.retry_attempts = settings.retry_attempts
+    model_name: str = settings.default_model
+    temperature: float = settings.model_temperature
+    max_tokens: int = settings.max_tokens
+    retry_attempts: int = settings.retry_attempts
 
-class BaseAgent(Generic[ModelType]):
-    """Base class for all AI agents"""
+class AgentResult(BaseModel, Generic[ResultT]):
+    """
+    Standard result container for all agent runs.
+    
+    Contains both the agent-specific result data and usage information.
+    """
+    data: ResultT
+    usage: Usage
+    
+    @property
+    def total_tokens(self) -> int:
+        """Get the total tokens used"""
+        return self.usage.total_tokens
+    
+    @property
+    def model(self) -> str:
+        """Get the model used for this run"""
+        return self.usage.model
+        
+    @property
+    def cost(self) -> float:
+        """Get the cost of this run"""
+        return self.usage.cost
+    
+    @classmethod
+    def create(cls, result: Any, model_name: str) -> "AgentResult":
+        """Create an AgentResult from a Pydantic AI result"""
+        # Extract the structured data from the result
+        data = result.data
+        
+        # Extract usage metrics
+        usage = extract_usage_from_result(result, model_name)
+        
+        return cls(data=data, usage=usage)
+
+class BaseAgent(Generic[DepsT, ResultT]):
+    """
+    Base class for all AI agents following the Pydantic AI pattern.
+    
+    Uses dataclasses for dependencies and Pydantic models for results.
+    Provides consistent token tracking, cost calculation, and logging.
+    """
+    
+    # Class variables for agent configuration
+    deps_type: ClassVar[Optional[Type[DepsT]]] = None
+    result_type: ClassVar[Optional[Type[ResultT]]] = None
+    default_system_prompt: ClassVar[str] = ""
     
     def __init__(
         self,
         config: Optional[AgentConfig] = None,
-        system_prompt: str = "",
-        model_type: Optional[Type[ModelType]] = None
+        system_prompt: Optional[str] = None,
+        deps_type: Optional[Type[DepsT]] = None,
+        result_type: Optional[Type[ResultT]] = None
     ):
+        """Initialize the agent with configuration"""
         self.config = config or AgentConfig()
-        self.model_type = model_type
+        self._deps_type = deps_type or self.deps_type
+        self._result_type = result_type or self.result_type
+        self._system_prompt = system_prompt or self.default_system_prompt
         
-        # Log agent initialization
-        logger.info(
-            "Initializing agent",
-            model_name=self.config.model_name,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            retry_attempts=self.config.retry_attempts
-        )
+        # Validate that we have a result type
+        if not self._result_type:
+            raise ValueError("Result type must be specified")
         
-        # Initialize the Pydantic AI agent with Logfire instrumentation
+        # Initialize the Pydantic AI agent
         self.agent = Agent(
             model=self.config.model_name,
-            result_type=self.model_type,
-            system_prompt=system_prompt,
-            instrument=True  # Enable Logfire instrumentation
+            deps_type=self._deps_type,
+            result_type=self._result_type,
+            system_prompt=self._system_prompt,
+            instrument=True,  # Enable instrumentation for metrics
+            model_settings={
+                "temperature": self.config.temperature,
+                "max_tokens": self.config.max_tokens,
+            }
         )
+        
+        logger.debug(f"Initialized {self.__class__.__name__} with model {self.config.model_name}")
     
     def tool(self, func: Callable) -> Callable:
-        """Decorator for registering tools with the agent"""
+        """Register a tool function with the agent"""
         logger.debug(f"Registering tool: {func.__name__}")
         return self.agent.tool(func)
+    
+    def system_prompt_fn(self, func: Callable) -> Callable:
+        """Register a dynamic system prompt function"""
+        logger.debug(f"Registering system prompt function: {func.__name__}")
+        return self.agent.system_prompt(func)
     
     async def run(
         self,
         user_prompt: str,
-        deps: Optional[ModelType] = None,
-        **kwargs: Dict[str, Any]
-    ) -> ModelType:
-        """Run the agent with the given prompt and dependencies"""
+        deps: Optional[DepsT] = None,
+        **kwargs
+    ) -> AgentResult[ResultT]:
+        """
+        Run the agent with the given prompt and dependencies.
+        
+        Returns an AgentResult containing both the result data and usage metrics.
+        """
         try:
-            # Log the start of the run with detailed context
-            logger.info(
-                "Starting agent run",
-                prompt_length=len(user_prompt),
-                has_dependencies=deps is not None,
-                model=self.config.model_name,
-                temperature=self.config.temperature,
-                **kwargs
-            )
+            logger.info(f"Running agent", model=self.config.model_name, prompt_length=len(user_prompt))
             
-            # Run the agent with proper context handling
+            # Run the agent
             result = await self.agent.run(
                 user_prompt=user_prompt,
                 deps=deps,
                 **kwargs
             )
             
-            # Log successful completion
+            # Package the result with usage information
+            agent_result = AgentResult.create(result, self.config.model_name)
+            
+            # Log completion metrics
             logger.info(
-                "Agent run completed successfully",
-                result_type=type(result.data).__name__
+                "Agent run completed",
+                tokens=agent_result.total_tokens,
+                cost=agent_result.cost,
+                model=agent_result.model
             )
             
-            return result.data
+            return agent_result
                 
         except Exception as e:
-            # Log error with detailed context
             logger.error(
                 "Agent run failed",
                 error=str(e),
                 error_type=type(e).__name__,
-                retry_attempts_remaining=self.config.retry_attempts,
-                model=self.config.model_name
+                retry_attempts_remaining=self.config.retry_attempts
             )
             
+            # Retry logic if configured
             if self.config.retry_attempts > 0:
-                self.config.retry_attempts -= 1
-                logger.info(
-                    f"Retrying run",
-                    attempts_remaining=self.config.retry_attempts,
-                    model=self.config.model_name
+                logger.info("Retrying agent run", attempts_remaining=self.config.retry_attempts)
+                # Create new config with decremented retry attempts
+                retry_config = AgentConfig(
+                    model_name=self.config.model_name,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    retry_attempts=self.config.retry_attempts - 1
                 )
+                self.config = retry_config
                 return await self.run(user_prompt, deps, **kwargs)
+            
+            # If no more retries, re-raise the exception
             raise
     
     def run_sync(
         self,
         user_prompt: str,
-        deps: Optional[ModelType] = None
-    ) -> ModelType:
-        """Run the agent synchronously and return typed result"""
-        # Validate user prompt is not empty
+        deps: Optional[DepsT] = None,
+        **kwargs
+    ) -> AgentResult[ResultT]:
+        """
+        Run the agent synchronously.
+        
+        Returns an AgentResult containing both the result data and usage metrics.
+        """
         if not user_prompt or not user_prompt.strip():
-            logger.error("Empty prompt provided")
             raise ValueError("User prompt cannot be empty")
             
-        # Log the start of the synchronous run
-        logger.info(
-            "Starting synchronous agent run",
-            prompt_length=len(user_prompt),
-            has_dependencies=deps is not None,
-            model=self.config.model_name
-        )
-        
+        logger.info(f"Running agent synchronously", model=self.config.model_name)
+            
         # Run the agent synchronously
         result = self.agent.run_sync(
             user_prompt=user_prompt,
-            deps=deps
+            deps=deps,
+            **kwargs
         )
         
-        # Log successful completion
+        # Package the result with usage information
+        agent_result = AgentResult.create(result, self.config.model_name)
+        
+        # Log completion
         logger.info(
-            "Synchronous agent run completed successfully",
-            result_type=type(result.data).__name__
+            "Synchronous agent run completed",
+            tokens=agent_result.total_tokens,
+            cost=agent_result.cost,
+            model=agent_result.model
         )
         
-        return result.data
+        return agent_result
+    
+    async def stream(
+        self,
+        user_prompt: str,
+        deps: Optional[DepsT] = None,
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """Stream the agent's response"""
+        logger.info(f"Streaming agent response", model=self.config.model_name)
+        
+        async for chunk in self.agent.stream(
+            user_prompt=user_prompt,
+            deps=deps,
+            **kwargs
+        ):
+            yield chunk
     
     @property
     def system_prompt(self) -> str:
@@ -147,9 +237,5 @@ class BaseAgent(Generic[ModelType]):
     @system_prompt.setter
     def system_prompt(self, value: str):
         """Update the system prompt"""
-        logger.info(
-            "Updating system prompt",
-            prompt_length=len(value),
-            model=self.config.model_name
-        )
+        logger.debug(f"Updating system prompt")
         self.agent.system_prompt = value 

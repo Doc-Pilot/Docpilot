@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, ClassVar, Type
 from pydantic import BaseModel, Field
-from .base import BaseAgent, AgentConfig
+from .base import BaseAgent, AgentConfig, AgentResult
 from .code_analyzer import CodeElement
+from ..utils.metrics import Usage
 from ..prompts.agent_prompts import QUALITY_CHECKER_PROMPT
 
 @dataclass
@@ -46,20 +47,25 @@ class ConsistencyResult(BaseModel):
     consistency_score: float = Field(description="Consistency score (0.0-1.0)")
     style_guide_violations: List[str] = Field(default_factory=list, description="Style guide violations")
 
-class QualityChecker(BaseAgent[QualityResult]):
+class QualityChecker(BaseAgent[QualityCheckInput, QualityResult]):
     """Agent for checking documentation quality"""
+    
+    # Set class variables for type checking
+    deps_type: ClassVar[Type[QualityCheckInput]] = QualityCheckInput
+    result_type: ClassVar[Type[QualityResult]] = QualityResult
+    default_system_prompt: ClassVar[str] = QUALITY_CHECKER_PROMPT
     
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
-            config=config or AgentConfig(),
-            system_prompt=QUALITY_CHECKER_PROMPT,
-            model_type=QualityResult
+            config=config,
+            deps_type=self.deps_type,
+            result_type=self.result_type
         )
     
-    def check_quality(
+    async def check_quality(
         self,
         input_data: QualityCheckInput
-    ) -> QualityResult:
+    ) -> AgentResult[QualityResult]:
         """Check the quality of documentation for a code element"""
         # Validate input
         if not input_data.code_element_name or not input_data.code_element_name.strip():
@@ -69,15 +75,15 @@ class QualityChecker(BaseAgent[QualityResult]):
             
         code_context = f"\n\nCode context:\n```{input_data.language}\n{input_data.code}\n```" if input_data.code else ""
         
-        return self.run_sync(
+        return await self.run(
             user_prompt=f"Check documentation quality for {input_data.code_element_name} using {input_data.style_guide} style guide:\n\n```{input_data.language}\n{input_data.docstring}\n```{code_context}",
             deps=input_data
         )
     
-    def analyze_completeness(
+    async def analyze_completeness(
         self,
         input_data: QualityCheckInput
-    ) -> CompletenessResult:
+    ) -> AgentResult[CompletenessResult]:
         """Analyze documentation completeness"""
         # Validate input
         if not input_data.code_element_name or not input_data.code_element_name.strip():
@@ -87,48 +93,39 @@ class QualityChecker(BaseAgent[QualityResult]):
             
         code_context = f"\n\nCode context:\n```{input_data.language}\n{input_data.code}\n```" if input_data.code else ""
         
-        result = self.run_sync(
+        # Create a specialized agent for completeness checks
+        completeness_agent = BaseAgent[QualityCheckInput, CompletenessResult](
+            config=self.config,
+            system_prompt="You are an expert in analyzing documentation completeness.",
+            deps_type=QualityCheckInput,
+            result_type=CompletenessResult
+        )
+        
+        return await completeness_agent.run(
             user_prompt=f"Analyze completeness of documentation for {input_data.code_element_name}:\n\n```{input_data.language}\n{input_data.docstring}\n```{code_context}",
             deps=input_data
         )
-        if not isinstance(result, CompletenessResult):
-            # Convert QualityResult to CompletenessResult if needed
-            missing = []
-            if isinstance(result, QualityResult):
-                missing = [issue.description for issue in result.issues 
-                          if "missing" in issue.description.lower() or "lacks" in issue.description.lower()]
-            
-            return CompletenessResult(
-                missing_elements=missing,
-                completeness_score=len(missing) > 0 and 0.5 or 1.0
-            )
-        return result
     
-    def check_consistency(
+    async def check_consistency(
         self,
         input_data: QualityCheckInput
-    ) -> ConsistencyResult:
+    ) -> AgentResult[ConsistencyResult]:
         """Check documentation consistency with style guide"""
         # Validate input
         if not input_data.code_element_name or not input_data.code_element_name.strip():
             raise ValueError("Code element name cannot be empty")
         if not input_data.docstring or not input_data.docstring.strip():
             raise ValueError("Docstring cannot be empty")
+        
+        # Create a specialized agent for consistency checks
+        consistency_agent = BaseAgent[QualityCheckInput, ConsistencyResult](
+            config=self.config,
+            system_prompt=f"You are an expert in {input_data.style_guide} style documentation. Check for consistency issues.",
+            deps_type=QualityCheckInput,
+            result_type=ConsistencyResult
+        )
             
-        result = self.run_sync(
+        return await consistency_agent.run(
             user_prompt=f"Check consistency of documentation with {input_data.style_guide} style guide:\n\n```{input_data.language}\n{input_data.docstring}\n```",
             deps=input_data
         )
-        if not isinstance(result, ConsistencyResult):
-            # Convert QualityResult to ConsistencyResult if needed
-            inconsistencies = []
-            if isinstance(result, QualityResult):
-                inconsistencies = [issue.description for issue in result.issues 
-                                 if "style" in issue.description.lower() or "format" in issue.description.lower()]
-            
-            return ConsistencyResult(
-                inconsistencies=inconsistencies,
-                consistency_score=len(inconsistencies) > 0 and 0.7 or 1.0,
-                style_guide_violations=[]
-            )
-        return result

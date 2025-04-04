@@ -14,4 +14,5 @@ requests==2.31.0
 sqlalchemy==2.0.22
 alembic==1.12.1
 psycopg2-binary==2.9.9
-logfire[fastapi]>=0.8.0 
+logfire[fastapi]>=0.8.0
+pathspec>=0.11.0 

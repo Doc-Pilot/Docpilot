@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, ClassVar, Type
 from pydantic import BaseModel, Field
-from .base import BaseAgent, AgentConfig
+from .base import BaseAgent, AgentConfig, AgentResult
 from ..prompts.agent_prompts import CODE_ANALYZER_PROMPT
 
 @dataclass
@@ -43,17 +43,22 @@ class ComplexityResult(BaseModel):
     factors: List[str] = Field(default_factory=list, description="Factors contributing to complexity")
     suggestions: List[str] = Field(default_factory=list, description="Suggestions to reduce complexity")
 
-class CodeAnalyzer(BaseAgent[CodeAnalysisResult]):
+class CodeAnalyzer(BaseAgent[CodeElement, CodeAnalysisResult]):
     """Agent for analyzing code elements"""
+    
+    # Set class variables for type checking
+    deps_type: ClassVar[Type[CodeElement]] = CodeElement
+    result_type: ClassVar[Type[CodeAnalysisResult]] = CodeAnalysisResult
+    default_system_prompt: ClassVar[str] = CODE_ANALYZER_PROMPT
     
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
-            config=config or AgentConfig(),
-            system_prompt=CODE_ANALYZER_PROMPT,
-            model_type=CodeAnalysisResult
+            config=config,
+            deps_type=self.deps_type,
+            result_type=self.result_type
         )
     
-    def analyze_code(self, code_element: CodeElement) -> CodeAnalysisResult:
+    async def analyze_code(self, code_element: CodeElement) -> AgentResult[CodeAnalysisResult]:
         """Analyze a code element and return structured results"""
         # Validate input
         if not code_element.name or not code_element.name.strip():
@@ -61,59 +66,51 @@ class CodeAnalyzer(BaseAgent[CodeAnalysisResult]):
         if not code_element.code or not code_element.code.strip():
             raise ValueError("Code cannot be empty")
             
-        return self.run_sync(
+        return await self.run(
             user_prompt=f"Analyze this {code_element.element_type or 'code'} element named {code_element.name}:\n\n```{code_element.language or ''}\n{code_element.code}\n```",
-            deps=CodeElement(
-                name=code_element.name,
-                code=code_element.code,
-                file_path=code_element.file_path,
-                element_type=code_element.element_type,
-                language=code_element.language
-            )
+            deps=code_element
         )
     
-    def parse_docstring(self, docstring: str) -> DocstringResult:
+    async def parse_docstring(self, docstring: str) -> AgentResult[DocstringResult]:
         """Parse docstring and extract structured information"""
         # Validate input
         if not docstring or not docstring.strip():
             raise ValueError("Docstring cannot be empty")
+        
+        # Create a specialized agent for docstring parsing
+        docstring_agent = BaseAgent[CodeElement, DocstringResult](
+            config=self.config,
+            system_prompt="You are an expert at parsing docstrings from code. Extract structured information about parameters, return values, and examples.",
+            deps_type=CodeElement,
+            result_type=DocstringResult
+        )
             
-        result = self.run_sync(
+        return await docstring_agent.run(
             user_prompt=f"Parse this docstring and extract structured information:\n\n{docstring}",
             deps=CodeElement(
                 name="docstring",
                 code=docstring
             )
         )
-        if not isinstance(result, DocstringResult):
-            # Convert CodeAnalysisResult to DocstringResult if needed
-            return DocstringResult(
-                description=result.summary,
-                params=[{"name": inp.get("name", ""), "description": inp.get("description", "")} 
-                       for inp in result.inputs],
-                returns=result.outputs[0].get("description") if result.outputs else None,
-                examples=[]
-            )
-        return result
     
-    def calculate_complexity(self, code: str) -> ComplexityResult:
+    async def calculate_complexity(self, code: str) -> AgentResult[ComplexityResult]:
         """Calculate complexity of code and provide improvement suggestions"""
         # Validate input
         if not code or not code.strip():
             raise ValueError("Code cannot be empty")
+        
+        # Create a specialized agent for complexity analysis
+        complexity_agent = BaseAgent[CodeElement, ComplexityResult](
+            config=self.config,
+            system_prompt="You are an expert at analyzing code complexity. Rate code on a scale of 1-10, identify factors contributing to complexity, and suggest improvements.",
+            deps_type=CodeElement,
+            result_type=ComplexityResult
+        )
             
-        result = self.run_sync(
+        return await complexity_agent.run(
             user_prompt=f"Calculate the complexity of this code and suggest improvements:\n\n```\n{code}\n```",
             deps=CodeElement(
                 name="complexity_analysis",
                 code=code
             )
         )
-        if not isinstance(result, ComplexityResult):
-            # Convert CodeAnalysisResult to ComplexityResult if needed
-            return ComplexityResult(
-                score=result.complexity,
-                factors=[],
-                suggestions=[]
-            )
-        return result

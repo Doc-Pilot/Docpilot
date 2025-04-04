@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, ClassVar, Type
 from pydantic import BaseModel, Field
-from .base import BaseAgent, AgentConfig
+from .base import BaseAgent, AgentConfig, AgentResult
 from .code_analyzer import CodeElement
+from ..utils.metrics import Usage
 from ..prompts.agent_prompts import DOC_GENERATOR_PROMPT
 
 @dataclass
@@ -41,20 +42,25 @@ class ImprovementsResult(BaseModel):
     suggestions: List[str] = Field(default_factory=list, description="Improvement suggestions")
     rationale: List[str] = Field(default_factory=list, description="Rationale for each suggestion")
 
-class DocGenerator(BaseAgent[DocumentationResult]):
+class DocGenerator(BaseAgent[DocGeneratorInput, DocumentationResult]):
     """Agent for generating code documentation"""
+    
+    # Set class variables for type checking
+    deps_type: ClassVar[Type[DocGeneratorInput]] = DocGeneratorInput
+    result_type: ClassVar[Type[DocumentationResult]] = DocumentationResult
+    default_system_prompt: ClassVar[str] = DOC_GENERATOR_PROMPT
     
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
-            config=config or AgentConfig(),
-            system_prompt=DOC_GENERATOR_PROMPT,
-            model_type=DocumentationResult
+            config=config,
+            deps_type=self.deps_type,
+            result_type=self.result_type
         )
     
-    def generate_docstring(
+    async def generate_docstring(
         self,
         input_data: DocGeneratorInput
-    ) -> DocumentationResult:
+    ) -> AgentResult[DocumentationResult]:
         """Generate a docstring for the provided code element"""
         # Validate input
         if not input_data.code or not input_data.code.strip():
@@ -62,15 +68,15 @@ class DocGenerator(BaseAgent[DocumentationResult]):
         if not input_data.element_name or not input_data.element_name.strip():
             raise ValueError("Element name cannot be empty")
             
-        return self.run_sync(
+        return await self.run(
             user_prompt=f"Generate a {input_data.style_guide} style docstring for this {input_data.element_type or 'code'} in {input_data.language}:\n\n```{input_data.language}\n{input_data.code}\n```",
             deps=input_data
         )
     
-    def generate_examples(
+    async def generate_examples(
         self,
         input_data: DocGeneratorInput
-    ) -> ExamplesResult:
+    ) -> AgentResult[ExamplesResult]:
         """Generate usage examples for the provided code element"""
         # Validate input
         if not input_data.code or not input_data.code.strip():
@@ -78,22 +84,23 @@ class DocGenerator(BaseAgent[DocumentationResult]):
         if not input_data.element_name or not input_data.element_name.strip():
             raise ValueError("Element name cannot be empty")
             
-        result = self.run_sync(
+        # Create a specialized agent for examples
+        examples_agent = BaseAgent[DocGeneratorInput, ExamplesResult](
+            config=self.config,
+            system_prompt=f"You are an expert in {input_data.language} programming. Create helpful usage examples for code.",
+            deps_type=DocGeneratorInput,
+            result_type=ExamplesResult
+        )
+            
+        return await examples_agent.run(
             user_prompt=f"Generate usage examples for this {input_data.element_type or 'code'} in {input_data.language}:\n\n```{input_data.language}\n{input_data.code}\n```",
             deps=input_data
         )
-        if not isinstance(result, ExamplesResult):
-            # Handle the case where we got a different result type
-            return ExamplesResult(
-                examples=[{"title": "Basic Usage", "code": "# No example available"}],
-                explanation="Examples could not be generated automatically."
-            )
-        return result
     
-    def suggest_improvements(
+    async def suggest_improvements(
         self,
         input_data: DocGeneratorInput
-    ) -> ImprovementsResult:
+    ) -> AgentResult[ImprovementsResult]:
         """Suggest improvements for the existing docstring"""
         # Validate input
         if not input_data.code or not input_data.code.strip():
@@ -102,19 +109,25 @@ class DocGenerator(BaseAgent[DocumentationResult]):
             raise ValueError("Element name cannot be empty")
             
         if not input_data.existing_docstring:
-            return ImprovementsResult(
+            # Create an empty result without calling the LLM
+            result = ImprovementsResult(
                 suggestions=["No existing docstring to improve."],
                 rationale=["Provide an existing docstring to get improvement suggestions."]
             )
+            # Create usage info with zero tokens
+            usage = Usage(model=self.config.model_name)
+            # Return as AgentResult
+            return AgentResult(data=result, usage=usage)
             
-        result = self.run_sync(
+        # Create a specialized agent for improvement suggestions
+        improvements_agent = BaseAgent[DocGeneratorInput, ImprovementsResult](
+            config=self.config,
+            system_prompt=f"You are an expert in {input_data.language} documentation. Analyze existing docstrings and suggest improvements.",
+            deps_type=DocGeneratorInput,
+            result_type=ImprovementsResult
+        )
+            
+        return await improvements_agent.run(
             user_prompt=f"Suggest improvements for this existing docstring for {input_data.element_name} ({input_data.style_guide} style):\n\n```{input_data.language}\n{input_data.existing_docstring}\n```\n\nThe code is:\n\n```{input_data.language}\n{input_data.code}\n```",
             deps=input_data
-        )
-        if not isinstance(result, ImprovementsResult):
-            # Handle the case where we got a different result type
-            return ImprovementsResult(
-                suggestions=["Automatic improvement suggestions not available."],
-                rationale=["Please review the docstring manually."]
-            )
-        return result 
+        ) 

@@ -12,6 +12,7 @@ import re
 import fnmatch
 from typing import List, Dict, Any, Optional, Set
 import logging
+import pathspec
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,8 @@ class RepoScanner:
         self,
         repo_path: str,
         include_patterns: List[str] = None,
-        exclude_patterns: List[str] = None
+        exclude_patterns: List[str] = None,
+        use_gitignore: bool = True
     ):
         """
         Initialize the repository scanner
@@ -31,14 +33,49 @@ class RepoScanner:
             repo_path: Path to the repository
             include_patterns: List of glob patterns to include
             exclude_patterns: List of glob patterns to exclude
+            use_gitignore: Whether to use .gitignore patterns
         """
         self.repo_path = repo_path
         self.include_patterns = include_patterns or ["*"]
-        self.exclude_patterns = exclude_patterns or [
+        
+        # Default exclude patterns
+        default_exclude_patterns = [
             # Common patterns to exclude
             "**/.git/**", "**/node_modules/**", "**/venv/**", "**/__pycache__/**",
-            "**/.pytest_cache/**", "**/.vscode/**", "**/.idea/**"
+            "**/.pytest_cache/**", "**/.vscode/**", "**/.idea/**", "**/build/**",
+            "**/dist/**", "**/out/**", "**/target/**", "**/.DS_Store",
+            "**/.env", "**/.env.*", "**/.gitignore", "**/.gitattributes",
+            "**/coverage/**", "**/logs/**", "**/*.log", "**/*.pyc", "**/*.pyo",
+            "**/yarn.lock", "**/package-lock.json", "**/Pipfile.lock", "**/poetry.lock",
+            "**/tmp/**", "**/.cache/**", "**/.docker/**", "**/bin/**", "**/obj/**",
+            "**/*.egg-info/**", "**/*~", "**/*.swp", "**/*.swo", "**/Thumbs.db"
         ]
+        
+        # Use provided exclude patterns or default ones
+        self.exclude_patterns = exclude_patterns or default_exclude_patterns
+        
+        # Setup pathspec for gitignore
+        self.gitignore_spec = None
+        if use_gitignore:
+            self._load_gitignore()
+        
+    def _load_gitignore(self):
+        """Load .gitignore file and create a spec for matching"""
+        gitignore_path = os.path.join(self.repo_path, '.gitignore')
+        if os.path.exists(gitignore_path):
+            with open(gitignore_path, 'r', encoding='utf-8') as f:
+                gitignore_content = f.read()
+                
+            try:
+                # Create gitignore spec
+                self.gitignore_spec = pathspec.PathSpec.from_lines(
+                    pathspec.patterns.GitWildMatchPattern, 
+                    gitignore_content.splitlines()
+                )
+                logger.info(f"Loaded .gitignore file with {len(self.gitignore_spec.patterns)} patterns")
+            except Exception as e:
+                logger.warning(f"Error loading .gitignore file: {str(e)}")
+                self.gitignore_spec = None
         
     def scan_files(self) -> List[str]:
         """
@@ -49,7 +86,16 @@ class RepoScanner:
         """
         file_list = []
         
-        for root, _, files in os.walk(self.repo_path):
+        for root, dirs, files in os.walk(self.repo_path):
+            # Skip directories matching gitignore patterns
+            if self.gitignore_spec:
+                # Get relative paths for directories
+                rel_dirs = [os.path.relpath(os.path.join(root, d), self.repo_path) for d in dirs]
+                # Filter out directories that match gitignore patterns
+                for i, (d, rel_path) in enumerate(zip(dirs[:], rel_dirs)):
+                    if self.gitignore_spec.match_file(rel_path) or self.gitignore_spec.match_file(f"{rel_path}/"):
+                        dirs.remove(d)
+            
             for file in files:
                 full_path = os.path.join(root, file)
                 rel_path = os.path.relpath(full_path, self.repo_path)
@@ -72,6 +118,10 @@ class RepoScanner:
         """
         # Convert Windows path separators to Unix style for pattern matching
         file_path = file_path.replace('\\', '/')
+        
+        # Check if the file matches gitignore patterns
+        if self.gitignore_spec and self.gitignore_spec.match_file(file_path):
+            return False
         
         # Check exclude patterns first
         for pattern in self.exclude_patterns:

@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple, ClassVar, Type
 from pydantic import BaseModel, Field
-from .base import BaseAgent, AgentConfig
+from .base import BaseAgent, AgentConfig, AgentResult
+from ..utils.metrics import Usage
 from ..prompts.agent_prompts import API_DOC_GENERATOR_PROMPT
 
 @dataclass
@@ -23,6 +24,8 @@ class APIDocInput:
     usage_patterns: Optional[List[str]] = None
     target_audience: Optional[str] = None
     implementation_details: Optional[Dict[str, Any]] = None
+    api_files: Optional[List[Tuple[str, str]]] = None
+    technologies: Optional[List[str]] = None
     
     def __post_init__(self):
         """Validate the input after initialization"""
@@ -60,20 +63,25 @@ class APIExamplesResult(BaseModel):
     """Result of API examples generation"""
     examples: List[Dict[str, Any]] = Field(default_factory=list, description="API examples")
     
-class APIDocGenerator(BaseAgent[APIDocResult]):
+class APIDocGenerator(BaseAgent[APIDocInput, APIDocResult]):
     """Agent for generating API documentation"""
+    
+    # Set class variables for type checking
+    deps_type: ClassVar[Type[APIDocInput]] = APIDocInput
+    result_type: ClassVar[Type[APIDocResult]] = APIDocResult
+    default_system_prompt: ClassVar[str] = API_DOC_GENERATOR_PROMPT
     
     def __init__(self, config: Optional[AgentConfig] = None):
         super().__init__(
-            config=config or AgentConfig(),
-            system_prompt=API_DOC_GENERATOR_PROMPT,
-            model_type=APIDocResult
+            config=config,
+            deps_type=self.deps_type,
+            result_type=self.result_type
         )
     
-    def generate_api_docs(
+    async def generate_api_docs(
         self,
         input_data: APIDocInput
-    ) -> APIDocResult:
+    ) -> AgentResult[APIDocResult]:
         """Generate API documentation for the provided code with enhanced context"""
         # Validate input
         if not input_data.code or not input_data.code.strip():
@@ -128,23 +136,35 @@ class APIDocGenerator(BaseAgent[APIDocResult]):
         existing_docs_text = ""
         if input_data.existing_docs:
             existing_docs_text = f"\n\nExisting Documentation:\n```markdown\n{input_data.existing_docs}\n```"
+            
+        # Include technologies if available
+        technologies_text = ""
+        if input_data.technologies and len(input_data.technologies) > 0:
+            technologies_text = f"\n\nTechnologies: {', '.join(input_data.technologies)}"
+            
+        # Include API files content if available
+        api_files_text = ""
+        if input_data.api_files and len(input_data.api_files) > 0:
+            api_files_text = "\n\nAPI Files:"
+            for file_path, content in input_data.api_files:
+                api_files_text += f"\n\nFile: {file_path}\n```\n{content}\n```"
         
         # Combine all context
-        enhanced_context = f"{project_description}{auth_details}{dependencies_text}{dir_structure_text}{usage_patterns_text}{audience_text}{implementation_text}{existing_docs_text}"
+        enhanced_context = f"{project_description}{auth_details}{dependencies_text}{dir_structure_text}{usage_patterns_text}{audience_text}{implementation_text}{existing_docs_text}{technologies_text}{api_files_text}"
         
-        return self.run_sync(
+        return await self.run(
             user_prompt=f"Generate API documentation for {input_data.api_name} in {input_data.language}{framework_text}. Include both Markdown documentation and OpenAPI specification.{enhanced_context}\n\n```{input_data.language}\n{input_data.code}\n```",
             deps=input_data
         )
     
-    def generate_api_examples(
+    async def generate_api_examples(
         self,
         api_doc: APIDocResult,
         languages: List[str] = ["python", "javascript", "curl"],
         usage_patterns: Optional[List[str]] = None,
         target_audience: Optional[str] = None,
         implementation_details: Optional[Dict[str, Any]] = None
-    ) -> APIExamplesResult:
+    ) -> AgentResult[APIExamplesResult]:
         """Generate usage examples for the API with enhanced context"""
         if not api_doc:
             raise ValueError("API documentation cannot be empty")
@@ -178,7 +198,15 @@ class APIDocGenerator(BaseAgent[APIDocResult]):
         # Combine all context
         enhanced_context = f"{usage_patterns_text}{audience_text}{implementation_text}"
         
-        result = self.run_sync(
+        # Create a specialized agent for API examples
+        examples_agent = BaseAgent[APIDocResult, APIExamplesResult](
+            config=self.config,
+            system_prompt="You are an API documentation expert. Generate quality code examples.",
+            deps_type=APIDocResult,
+            result_type=APIExamplesResult
+        )
+        
+        return await examples_agent.run(
             user_prompt=f"""Generate usage examples for these API endpoints in {languages_text}:
 
 API: {api_doc.title} v{api_doc.version}
@@ -192,24 +220,8 @@ For each endpoint, provide example requests and expected responses.
 """,
             deps=api_doc
         )
-        
-        if not isinstance(result, APIExamplesResult):
-            # Convert to APIExamplesResult if needed
-            examples = []
-            for endpoint in api_doc.endpoints:
-                for language in languages:
-                    examples.append({
-                        "endpoint": f"{endpoint.method} {endpoint.path}",
-                        "language": language,
-                        "code": f"# Example for {endpoint.method} {endpoint.path}\n# Not generated",
-                        "response": "# Example response\n# Not generated"
-                    })
-            
-            return APIExamplesResult(examples=examples)
-        
-        return result
     
-    def convert_to_openapi(
+    async def convert_to_openapi(
         self,
         api_doc: APIDocResult
     ) -> Dict[str, Any]:
@@ -220,8 +232,20 @@ For each endpoint, provide example requests and expected responses.
         # If we already have an OpenAPI spec, return it
         if api_doc.openapi_spec:
             return api_doc.openapi_spec
+        
+        # Create a dictionary result type for OpenAPI spec
+        class OpenAPISpec(BaseModel):
+            spec: Dict[str, Any] = Field(description="OpenAPI specification")
             
-        result = self.run_sync(
+        # Create a specialized agent for OpenAPI conversion
+        openapi_agent = BaseAgent[APIDocResult, OpenAPISpec](
+            config=self.config,
+            system_prompt="You are an OpenAPI specification expert. Convert API documentation to valid OpenAPI 3.0 specifications.",
+            deps_type=APIDocResult,
+            result_type=OpenAPISpec
+        )
+            
+        result = await openapi_agent.run(
             user_prompt=f"""Convert this API documentation to an OpenAPI 3.0 specification:
 
 API: {api_doc.title} v{api_doc.version}
@@ -236,35 +260,4 @@ Return a valid OpenAPI 3.0 specification as a JSON object.
             deps=api_doc
         )
         
-        # Extract OpenAPI spec from result
-        if isinstance(result, Dict):
-            return result
-        elif hasattr(result, "openapi_spec") and result.openapi_spec:
-            return result.openapi_spec
-        else:
-            # Create a basic OpenAPI spec
-            paths = {}
-            for endpoint in api_doc.endpoints:
-                if endpoint.path not in paths:
-                    paths[endpoint.path] = {}
-                    
-                method = endpoint.method.lower()
-                paths[endpoint.path][method] = {
-                    "summary": endpoint.summary,
-                    "description": endpoint.description,
-                    "responses": {
-                        "200": {
-                            "description": "Successful response"
-                        }
-                    }
-                }
-            
-            return {
-                "openapi": "3.0.0",
-                "info": {
-                    "title": api_doc.title,
-                    "version": api_doc.version,
-                    "description": api_doc.description
-                },
-                "paths": paths
-            } 
+        return result.data.spec 

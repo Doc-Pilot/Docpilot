@@ -6,7 +6,7 @@ This module provides AI agent classes for code analysis, documentation generatio
 and quality checking of documentation.
 """
 
-from .base import BaseAgent, AgentConfig
+from .base import BaseAgent, AgentConfig, AgentResult, RunContext
 from .code_analyzer import CodeAnalyzer, CodeElement, CodeAnalysisResult, DocstringResult, ComplexityResult
 from .doc_generator import DocGenerator, DocGeneratorInput, DocumentationResult, ExamplesResult, ImprovementsResult
 from .quality_checker import QualityChecker, QualityCheckInput, QualityResult, QualityIssue, CompletenessResult, ConsistencyResult
@@ -17,6 +17,8 @@ from .readme_generator import ReadmeGenerator, ReadmeInput, ReadmeResult, Readme
 __all__ = [
     'BaseAgent',
     'AgentConfig',
+    'AgentResult',
+    'RunContext',
     'CodeAnalyzer',
     'CodeElement',
     'CodeAnalysisResult',

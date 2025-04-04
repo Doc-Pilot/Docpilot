@@ -20,6 +20,9 @@ wheels/
 .installed.cfg
 *.egg
 
+.pytest_cache/
+examples/output
+
 # Environment
 .env
 .venv

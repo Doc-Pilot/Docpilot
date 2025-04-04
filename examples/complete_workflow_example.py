@@ -18,12 +18,14 @@ from pathlib import Path
 import logging
 import csv
 from typing import Dict, Any, Optional, List, Tuple
+import fnmatch
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, project_root)
 
 from src.utils.repo_scanner import RepoScanner
+from Docpilot.src.utils.metrics import ModelCosts
 from src.agents import (
     AgentConfig,
     RepoAnalyzer,
@@ -63,12 +65,12 @@ class WorkflowMetrics:
         self.detailed_log = os.path.join(self.output_dir, "detailed_log.txt")
         
         # Initialize CSV log with headers
-        with open(self.csv_log, 'w', newline='') as csvfile:
+        with open(self.csv_log, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['Timestamp', 'Workflow', 'Action', 'Duration', 'Cost', 'Tokens'])
         
         # Initialize detailed log
-        with open(self.detailed_log, 'w') as f:
+        with open(self.detailed_log, 'w', encoding='utf-8') as f:
             f.write(f"Workflow Run ID: {self.workflow_id}\n")
             f.write(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write("=" * 80 + "\n\n")
@@ -86,11 +88,11 @@ class WorkflowMetrics:
         }
         
         # Log to detailed log
-        with open(self.detailed_log, 'a') as f:
+        with open(self.detailed_log, 'a', encoding='utf-8') as f:
             f.write(f"[{timestamp}] STARTED: {name}\n")
         
         # Log to CSV
-        with open(self.csv_log, 'a', newline='') as csvfile:
+        with open(self.csv_log, 'a', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([timestamp, name, 'START', 0, 0, 0])
     
@@ -114,7 +116,7 @@ class WorkflowMetrics:
             self.total_tokens += tokens
             
             # Log to detailed log
-            with open(self.detailed_log, 'a') as f:
+            with open(self.detailed_log, 'a', encoding='utf-8') as f:
                 f.write(f"[{timestamp}] COMPLETED: {name}\n")
                 f.write(f"  Duration: {duration:.2f} seconds\n")
                 f.write(f"  Cost: ${cost:.4f}\n")
@@ -126,7 +128,7 @@ class WorkflowMetrics:
                 f.write("\n")
             
             # Log to CSV
-            with open(self.csv_log, 'a', newline='') as csvfile:
+            with open(self.csv_log, 'a', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow([timestamp, name, 'END', duration, cost, tokens])
     
@@ -135,7 +137,7 @@ class WorkflowMetrics:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
         # Log to detailed log
-        with open(self.detailed_log, 'a') as f:
+        with open(self.detailed_log, 'a', encoding='utf-8') as f:
             f.write(f"[{timestamp}] EVENT: {workflow} - {event}\n")
             if metadata:
                 for key, value in metadata.items():
@@ -143,7 +145,7 @@ class WorkflowMetrics:
             f.write("\n")
         
         # Log to CSV
-        with open(self.csv_log, 'a', newline='') as csvfile:
+        with open(self.csv_log, 'a', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow([timestamp, workflow, event, 0, 0, 0])
     
@@ -161,11 +163,11 @@ class WorkflowMetrics:
             "workflows": self.workflows
         }
         
-        with open(self.summary_file, 'w') as f:
-            json.dump(summary, f, indent=2)
+        with open(self.summary_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
         
         # Also append to the detailed log
-        with open(self.detailed_log, 'a') as f:
+        with open(self.detailed_log, 'a', encoding='utf-8') as f:
             f.write("\n" + "=" * 80 + "\n")
             f.write("WORKFLOW SUMMARY\n")
             f.write("=" * 80 + "\n")
@@ -254,7 +256,7 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
         logger.info(f"Starting repository analysis at: {repo_path}")
         
         # Initialize repository scanner
-        scanner = RepoScanner(repo_path)
+        scanner = RepoScanner(repo_path, use_gitignore=True)
         
         # Scan the repository
         logger.info("Scanning repository files...")
@@ -305,12 +307,14 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
         
         # Calculate LLM time and estimated cost
         llm_duration = time.time() - llm_start
-        # Estimate cost based on token count (adjust these values based on your model)
+        # Estimate tokens and cost
         estimated_input_tokens = 3000  # Approximate input tokens
         estimated_output_tokens = 2000  # Approximate output tokens
-        input_token_cost = 0.00001  # Cost per input token (adjust for your model)
-        output_token_cost = 0.00003  # Cost per output token (adjust for your model)
-        estimated_cost = (estimated_input_tokens * input_token_cost) + (estimated_output_tokens * output_token_cost)
+        
+        # Use ModelCosts to calculate cost
+        model_name = agent_config.llm_config.get("model_name", "default")
+        costs = ModelCosts.for_model(model_name)
+        estimated_cost = costs.calculate_cost(estimated_input_tokens, estimated_output_tokens)
         total_tokens = estimated_input_tokens + estimated_output_tokens
         
         # Log event with important stats
@@ -330,7 +334,7 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
         
         analysis_file = os.path.join(metrics.output_dir, "repo_analysis.json")
         with open(analysis_file, "w", encoding="utf-8") as f:
-            json.dump(analysis_results, f, indent=2)
+            json.dump(analysis_results, f, indent=2, ensure_ascii=False)
         
         # Generate repository structure tree
         directory_tree = create_directory_tree(repo_path)
@@ -342,7 +346,7 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
         doc_needs = repo_analyzer.identify_documentation_needs(repo_structure)
         doc_needs_file = os.path.join(metrics.output_dir, "documentation_needs.json")
         with open(doc_needs_file, "w", encoding="utf-8") as f:
-            json.dump({k: list(v) for k, v in doc_needs.items()}, f, indent=2)
+            json.dump({k: list(v) for k, v in doc_needs.items()}, f, indent=2, ensure_ascii=False)
         
         # Complete repository analysis with metrics
         metrics.end_workflow("repository_analysis", cost=estimated_cost, 
@@ -367,6 +371,9 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
             
             # Generate API documentation
             api_doc_input = APIDocInput(
+                code=api_files[0][1] if api_files else "",  # Use first file's content as code
+                api_name=f"{os.path.basename(repo_path)} API",
+                language="python",  # Assuming Python is the default language
                 api_files=api_files,
                 project_description=repo_structure.summary,
                 directory_structure=directory_tree,
@@ -380,22 +387,24 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
             
             # Calculate LLM time and estimated cost (API docs generation usually uses more tokens)
             llm_duration = time.time() - llm_start
-            # Estimate cost based on token count (adjust these values based on your model)
+            # Estimate tokens
             api_input_tokens = 5000  # Approximate input tokens
             api_output_tokens = 3000  # Approximate output tokens
-            api_cost = (api_input_tokens * input_token_cost) + (api_output_tokens * output_token_cost)
+            
+            # Calculate cost using ModelCosts
+            api_cost = costs.calculate_cost(api_input_tokens, api_output_tokens)
             api_total_tokens = api_input_tokens + api_output_tokens
             
             # Save API documentation
             api_doc_file = os.path.join(metrics.output_dir, "api_documentation.md")
             with open(api_doc_file, "w", encoding="utf-8") as f:
-                f.write(api_docs.content)
+                f.write(api_docs.markdown)
             
             # Generate OpenAPI spec
             openapi_spec = api_doc_generator.convert_to_openapi(api_docs)
             openapi_file = os.path.join(metrics.output_dir, "openapi_spec.json")
             with open(openapi_file, "w", encoding="utf-8") as f:
-                json.dump(openapi_spec, f, indent=2)
+                json.dump(openapi_spec, f, indent=2, ensure_ascii=False)
             
             # Complete API documentation with metrics
             metrics.end_workflow("api_documentation", cost=api_cost, 
@@ -458,7 +467,9 @@ def run_complete_workflow(repo_path: str, output_dir: str = "output"):
         llm_duration = time.time() - llm_start
         readme_input_tokens = 4000
         readme_output_tokens = 2500
-        readme_cost = (readme_input_tokens * input_token_cost) + (readme_output_tokens * output_token_cost)
+        
+        # Calculate cost using ModelCosts
+        readme_cost = costs.calculate_cost(readme_input_tokens, readme_output_tokens)
         readme_total_tokens = readme_input_tokens + readme_output_tokens
         
         # Save the generated README
@@ -528,16 +539,27 @@ def visualize_metrics(metrics: WorkflowMetrics, output_file: str):
             lines.append(f"{name.ljust(25)} | {bar} {duration:.2f}s")
     
     # Save to file
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         f.write("\n".join(lines))
 
-def create_directory_tree(repo_path, max_depth=3, excluded_dirs=None):
+def create_directory_tree(repo_path, max_depth=3, excluded_dirs=None, use_gitignore=True):
     """
     Create a structured directory tree representation of the repository
     with conventional top-level directories highlighted
     """
     if excluded_dirs is None:
-        excluded_dirs = ['.git', '.pytest_cache', '__pycache__', 'node_modules', 'venv', '.venv', 'env']
+        excluded_dirs = [
+            '.git', '.pytest_cache', '__pycache__', 'node_modules', 'venv', '.venv', 'env',
+            'build', 'dist', 'out', 'target', '.DS_Store', '.idea', '.vscode', '.cache',
+            'logs', 'tmp', 'bin', 'obj', 'coverage', '.docker', '.pytest_cache'
+        ]
+    
+    # Define files to exclude (glob patterns)
+    excluded_files = [
+        '.gitignore', '.gitattributes', '.env', '.env.*', '*.log', '*.pyc', '*.pyo', 
+        'yarn.lock', 'package-lock.json', 'Pipfile.lock', 'poetry.lock', '*~', '*.swp', 
+        '*.swo', 'Thumbs.db'
+    ]
     
     # Define conventional top-level directories with descriptions
     conventional_dirs = {
@@ -550,6 +572,54 @@ def create_directory_tree(repo_path, max_depth=3, excluded_dirs=None):
         'build': 'Build artifacts',
         'dist': 'Distribution files',
     }
+    
+    # Load .gitignore patterns if requested
+    gitignore_spec = None
+    if use_gitignore:
+        try:
+            import pathspec
+            gitignore_path = os.path.join(repo_path, '.gitignore')
+            if os.path.exists(gitignore_path):
+                with open(gitignore_path, 'r', encoding='utf-8') as f:
+                    gitignore_content = f.read()
+                gitignore_spec = pathspec.PathSpec.from_lines(
+                    pathspec.patterns.GitWildMatchPattern, 
+                    gitignore_content.splitlines()
+                )
+        except Exception as e:
+            print(f"Warning: Failed to load .gitignore: {e}")
+    
+    def _should_include_file(file_path):
+        """Check if file should be included in the tree"""
+        name = os.path.basename(file_path)
+        
+        # Check against excluded files list
+        if any(fnmatch.fnmatch(name, pattern) for pattern in excluded_files):
+            return False
+            
+        # Check against gitignore patterns
+        rel_path = os.path.relpath(file_path, repo_path)
+        unix_path = rel_path.replace('\\', '/')
+        if gitignore_spec and gitignore_spec.match_file(unix_path):
+            return False
+            
+        return True
+    
+    def _should_include_dir(dir_path):
+        """Check if directory should be included in the tree"""
+        name = os.path.basename(dir_path)
+        
+        # Check against excluded dirs list
+        if name in excluded_dirs:
+            return False
+            
+        # Check against gitignore patterns
+        rel_path = os.path.relpath(dir_path, repo_path)
+        unix_path = rel_path.replace('\\', '/')
+        if gitignore_spec and (gitignore_spec.match_file(unix_path) or gitignore_spec.match_file(f"{unix_path}/")):
+            return False
+            
+        return True
     
     def _generate_tree(path, prefix='', depth=0):
         if depth > max_depth:
@@ -564,12 +634,14 @@ def create_directory_tree(repo_path, max_depth=3, excluded_dirs=None):
             dirs = []
             files = []
             
+            # Filter directories and files
             for item in path_obj.iterdir():
                 if item.is_dir():
-                    if item.name not in excluded_dirs:
+                    if _should_include_dir(str(item)):
                         dirs.append(item)
                 else:
-                    files.append(item)
+                    if _should_include_file(str(item)):
+                        files.append(item)
             
             # Sort directories and files
             dirs.sort(key=lambda x: x.name.lower())
@@ -620,12 +692,8 @@ def create_directory_tree(repo_path, max_depth=3, excluded_dirs=None):
             result += f"{prefix}└── (Permission denied)\n"
         
         return result
-    
-    # Get repository name
-    repo_name = os.path.basename(os.path.abspath(repo_path))
-    
-    # Create the tree starting with the repository name
-    return f"{repo_name}/\n" + _generate_tree(repo_path)
+        
+    return _generate_tree(repo_path)
 
 if __name__ == "__main__":
     # If a path is provided as an argument, use it; otherwise use the current directory
