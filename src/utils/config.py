@@ -39,9 +39,9 @@ class Settings(BaseModel):
     
     # Model settings
     default_model: str = os.getenv("DEFAULT_MODEL", "openai:gpt-4o-mini")
-    model_temperature: float = float(os.getenv("MODEL_TEMPERATURE", "0.7"))
-    max_tokens: int = int(os.getenv("MAX_TOKENS", "2000"))
-    retry_attempts: int = int(os.getenv("RETRY_ATTEMPTS", "3"))
+    model_temperature: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
+    max_tokens: int = int(os.getenv("MAX_TOKENS", "4096"))
+    retry_attempts: int = int(os.getenv("RETRY_ATTEMPTS", "2"))
     
     class Config:
         env_file = ".env"

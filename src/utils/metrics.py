@@ -2,374 +2,215 @@
 Metrics Utility
 ==============
 
-This module provides utilities for tracking metrics and operations in the Docpilot pipeline.
-It includes timing, counters, and performance tracking for various operations.
+This module provides utilities for tracking and calculating token usage and costs
+for Large Language Model interactions.
 """
 
-import time
-import logging
-import threading
-from typing import Dict, Any, Optional, List, Union
-from datetime import datetime
-from .costs import TokenUsage
+from typing import Any, Dict, Optional, Union
+from pydantic import BaseModel, Field
+from ..utils.logging import logger
 
-# Thread-local storage for operation contexts
-_local = threading.local()
-
-# Global metrics registry
-_metrics = {
-    "operations": {},      # Operation timing metrics
-    "counters": {},        # Simple counters
-    "performance": {},     # Performance metrics
-    "errors": {},          # Error counts by type
-    "token_usage": {
-        "total_tokens": 0,
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_cost": 0.0,
-        "models": {},
-    },
-}
-
-# Logger for metrics
-logger = logging.getLogger("metrics")
-
-def start_operation(operation_name: str, metadata: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Start tracking an operation with timing.
+class ModelCosts(BaseModel):
+    """Defines cost structure for different LLM models"""
+    input_cost_per_token: float = Field(default=0.0, description="Cost per input token")
+    output_cost_per_token: float = Field(default=0.0, description="Cost per output token")
     
-    Args:
-        operation_name: The name of the operation to track
-        metadata: Optional metadata about the operation
-        
-    Returns:
-        operation_id: A unique identifier for the operation
-    """
-    # Generate operation ID
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    operation_id = f"{operation_name}_{timestamp}_{id(threading.current_thread())}"
-    
-    # Initialize thread-local operations dict if needed
-    if not hasattr(_local, 'operations'):
-        _local.operations = {}
-    
-    # Store operation context
-    _local.operations[operation_id] = {
-        "name": operation_name,
-        "start_time": time.time(),
-        "metadata": metadata or {},
-    }
-    
-    # Log operation start
-    logger.debug(f"Operation started: {operation_name}", extra={
-        "operation_id": operation_id,
-        "metadata": metadata or {},
-    })
-    
-    return operation_id
-
-def end_operation(operation_id: str, success: bool = True, result_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    End tracking an operation and record its metrics.
-    
-    Args:
-        operation_id: The operation ID returned from start_operation
-        success: Whether the operation completed successfully
-        result_metadata: Optional metadata about the operation result
-        
-    Returns:
-        metrics: Dictionary with metrics about the operation
-    """
-    # Initialize thread-local operations dict if needed
-    if not hasattr(_local, 'operations'):
-        _local.operations = {}
-    
-    # Get operation context
-    operation = _local.operations.get(operation_id)
-    if not operation:
-        logger.warning(f"No operation found with ID: {operation_id}")
-        return {}
-    
-    # Calculate duration
-    end_time = time.time()
-    duration = end_time - operation["start_time"]
-    
-    # Record operation metrics
-    operation_name = operation["name"]
-    
-    # Initialize metrics for this operation type if needed
-    if operation_name not in _metrics["operations"]:
-        _metrics["operations"][operation_name] = {
-            "count": 0,
-            "success_count": 0,
-            "failure_count": 0, 
-            "total_duration": 0,
-            "max_duration": 0,
-            "min_duration": float('inf'),
-        }
-    
-    # Update metrics
-    op_metrics = _metrics["operations"][operation_name]
-    op_metrics["count"] += 1
-    if success:
-        op_metrics["success_count"] += 1
-    else:
-        op_metrics["failure_count"] += 1
-    
-    op_metrics["total_duration"] += duration
-    op_metrics["max_duration"] = max(op_metrics["max_duration"], duration)
-    op_metrics["min_duration"] = min(op_metrics["min_duration"], duration)
-    
-    # Prepare result
-    result = {
-        "operation_id": operation_id,
-        "name": operation_name,
-        "duration": duration,
-        "success": success,
-        "start_time": operation["start_time"],
-        "end_time": end_time,
-        "metadata": {**operation["metadata"], **(result_metadata or {})},
-    }
-    
-    # Log operation end
-    logger.debug(f"Operation ended: {operation_name}", extra={
-        "operation_id": operation_id,
-        "duration": duration,
-        "success": success,
-        "metadata": result_metadata or {},
-    })
-    
-    # Clean up thread-local storage
-    del _local.operations[operation_id]
-    
-    return result
-
-def increment_counter(counter_name: str, value: int = 1) -> int:
-    """
-    Increment a named counter.
-    
-    Args:
-        counter_name: The name of the counter to increment
-        value: The amount to increment the counter by
-        
-    Returns:
-        The new counter value
-    """
-    if counter_name not in _metrics["counters"]:
-        _metrics["counters"][counter_name] = 0
-    
-    _metrics["counters"][counter_name] += value
-    return _metrics["counters"][counter_name]
-
-def record_performance_metric(name: str, value: float, metadata: Optional[Dict[str, Any]] = None) -> None:
-    """
-    Record a performance metric.
-    
-    Args:
-        name: The name of the metric
-        value: The value to record
-        metadata: Optional metadata about the metric
-    """
-    if name not in _metrics["performance"]:
-        _metrics["performance"][name] = {
-            "count": 0,
-            "total": 0,
-            "max": float('-inf'),
-            "min": float('inf'),
-            "samples": [],
-        }
-    
-    perf_metric = _metrics["performance"][name]
-    perf_metric["count"] += 1
-    perf_metric["total"] += value
-    perf_metric["max"] = max(perf_metric["max"], value)
-    perf_metric["min"] = min(perf_metric["min"], value)
-    
-    # Store a limited number of samples with timestamps and metadata
-    sample = {
-        "value": value,
-        "timestamp": time.time(),
-        "metadata": metadata or {},
-    }
-    
-    # Limit samples to prevent memory issues
-    MAX_SAMPLES = 100
-    perf_metric["samples"].append(sample)
-    if len(perf_metric["samples"]) > MAX_SAMPLES:
-        perf_metric["samples"] = perf_metric["samples"][-MAX_SAMPLES:]
-
-def record_error(error_type: str, details: Optional[Dict[str, Any]] = None) -> None:
-    """
-    Record an error occurrence.
-    
-    Args:
-        error_type: The type or category of error
-        details: Optional details about the error
-    """
-    if error_type not in _metrics["errors"]:
-        _metrics["errors"][error_type] = {
-            "count": 0,
-            "occurrences": [],
-        }
-    
-    error_metric = _metrics["errors"][error_type]
-    error_metric["count"] += 1
-    
-    # Store error details with timestamp
-    occurrence = {
-        "timestamp": time.time(),
-        "details": details or {},
-    }
-    
-    # Limit occurrences to prevent memory issues
-    MAX_OCCURRENCES = 50
-    error_metric["occurrences"].append(occurrence)
-    if len(error_metric["occurrences"]) > MAX_OCCURRENCES:
-        error_metric["occurrences"] = error_metric["occurrences"][-MAX_OCCURRENCES:]
-
-def record_token_usage(
-    model_name: str,
-    usage: Union[TokenUsage, Dict[str, int]],
-    cost: float = 0.0,
-    operation: Optional[str] = None
-) -> None:
-    """
-    Record token usage for a model.
-    
-    Args:
-        model_name: Name of the model used
-        usage: TokenUsage instance or dict with token counts
-        cost: Cost of the operation
-        operation: Optional operation name for categorization
-    """
-    # Convert dict to TokenUsage if needed
-    if isinstance(usage, dict):
-        token_usage = TokenUsage(
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            total_tokens=usage.get("total_tokens", 0),
-            cost=cost
-        )
-    else:
-        token_usage = usage
-    
-    # Update global token metrics
-    _metrics["token_usage"]["total_tokens"] += token_usage.total_tokens
-    _metrics["token_usage"]["prompt_tokens"] += token_usage.prompt_tokens
-    _metrics["token_usage"]["completion_tokens"] += token_usage.completion_tokens
-    _metrics["token_usage"]["total_cost"] += token_usage.cost if token_usage.cost > 0 else cost
-    
-    # Initialize model-specific metrics if needed
-    if model_name not in _metrics["token_usage"]["models"]:
-        _metrics["token_usage"]["models"][model_name] = {
-            "total_tokens": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_cost": 0.0,
-            "operations": {}
-        }
-    
-    # Update model-specific metrics
-    model_metrics = _metrics["token_usage"]["models"][model_name]
-    model_metrics["total_tokens"] += token_usage.total_tokens
-    model_metrics["prompt_tokens"] += token_usage.prompt_tokens
-    model_metrics["completion_tokens"] += token_usage.completion_tokens
-    model_metrics["total_cost"] += token_usage.cost if token_usage.cost > 0 else cost
-    
-    # Track operation-specific metrics if provided
-    if operation:
-        if operation not in model_metrics["operations"]:
-            model_metrics["operations"][operation] = {
-                "count": 0,
-                "total_tokens": 0,
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_cost": 0.0
+    @classmethod
+    def for_model(cls, model_name: str) -> "ModelCosts":
+        """Get cost structure for a specific model"""
+        costs = {
+            # OpenAI models
+            "gpt-4": {
+                "input_cost_per_token": 0.00003,  # $30/1M input
+                "output_cost_per_token": 0.00006,  # $60/1M output
+            },
+            "gpt-4-turbo": {
+                "input_cost_per_token": 0.00001,  # $10/1M input
+                "output_cost_per_token": 0.00003,  # $30/1M output
+            },
+            "gpt-4o": {
+                "input_cost_per_token": 0.000005,  # $5/1M input
+                "output_cost_per_token": 0.000015,  # $15/1M output
+            },
+            "gpt-4o-mini": {
+                "input_cost_per_token": 0.00000015,  # $0.15/1M input
+                "output_cost_per_token": 0.0000006,  # $0.6/1M output
+            },
+            "gpt-3.5-turbo": {
+                "input_cost_per_token": 0.0000005,  # $0.5/1M input
+                "output_cost_per_token": 0.0000015,  # $1.5/1M output
+            },
+            
+            # Anthropic models
+            "claude-3-opus": {
+                "input_cost_per_token": 0.000015,  # $15/1M input
+                "output_cost_per_token": 0.000075,  # $75/1M output
+            },
+            "claude-3-sonnet": {
+                "input_cost_per_token": 0.000003,  # $3/1M input
+                "output_cost_per_token": 0.000015,  # $15/1M output
+            },
+            "claude-3-haiku": {
+                "input_cost_per_token": 0.00000025,  # $0.25/1M input
+                "output_cost_per_token": 0.00000125,  # $1.25/1M output
+            },
+            
+            # Default for unknown models
+            "default": {
+                "input_cost_per_token": 0.0,
+                "output_cost_per_token": 0.0,
             }
+        }
         
-        # Update operation metrics
-        op_metrics = model_metrics["operations"][operation]
-        op_metrics["count"] += 1
-        op_metrics["total_tokens"] += token_usage.total_tokens
-        op_metrics["prompt_tokens"] += token_usage.prompt_tokens
-        op_metrics["completion_tokens"] += token_usage.completion_tokens
-        op_metrics["total_cost"] += token_usage.cost if token_usage.cost > 0 else cost
+        # Extract model name without provider prefix (e.g., openai:gpt-4o -> gpt-4o)
+        if ":" in model_name:
+            _, model_name = model_name.split(":", 1)
+        
+        # First try exact match
+        if model_name in costs:
+            cost_data = costs[model_name]
+            return ModelCosts(
+                input_cost_per_token=cost_data["input_cost_per_token"],
+                output_cost_per_token=cost_data["output_cost_per_token"]
+            )
+        
+        # If no exact match, try prefix match from most specific to least specific
+        model_matches = []
+        for key in costs:
+            if model_name.startswith(key):
+                model_matches.append((key, len(key)))
+        
+        # Sort by length (longest match first)
+        model_matches.sort(key=lambda x: x[1], reverse=True)
+        
+        if model_matches:
+            best_match = model_matches[0][0]
+            cost_data = costs[best_match]
+            return ModelCosts(
+                input_cost_per_token=cost_data["input_cost_per_token"],
+                output_cost_per_token=cost_data["output_cost_per_token"]
+            )
+            
+        # If still no match, try substring match  
+        for key in costs:
+            if key in model_name:
+                cost_data = costs[key]
+                return ModelCosts(
+                    input_cost_per_token=cost_data["input_cost_per_token"],
+                    output_cost_per_token=cost_data["output_cost_per_token"]
+                )
+        
+        # Return default if no match found
+        default_data = costs["default"]
+        return ModelCosts(
+            input_cost_per_token=default_data["input_cost_per_token"],
+            output_cost_per_token=default_data["output_cost_per_token"]
+        )
 
-def get_metrics() -> Dict[str, Any]:
-    """
-    Get the current metrics.
-    
-    Returns:
-        Dictionary containing all recorded metrics
-    """
-    # Calculate averages for operations
-    result = {
-        "operations": {},
-        "counters": _metrics["counters"].copy(),
-        "performance": {},
-        "errors": {},
-        "token_usage": {
-            "total_tokens": _metrics["token_usage"]["total_tokens"],
-            "prompt_tokens": _metrics["token_usage"]["prompt_tokens"],
-            "completion_tokens": _metrics["token_usage"]["completion_tokens"],
-            "total_cost": round(_metrics["token_usage"]["total_cost"], 6),
-            "models": {}
-        },
-    }
-    
-    # Process operations
-    for name, metrics in _metrics["operations"].items():
-        result["operations"][name] = metrics.copy()
-        if metrics["count"] > 0:
-            result["operations"][name]["avg_duration"] = metrics["total_duration"] / metrics["count"]
-    
-    # Process performance metrics
-    for name, metrics in _metrics["performance"].items():
-        result["performance"][name] = {
-            "count": metrics["count"],
-            "total": metrics["total"],
-            "max": metrics["max"],
-            "min": metrics["min"],
-            "avg": metrics["total"] / metrics["count"] if metrics["count"] > 0 else 0,
-            "samples": metrics["samples"][-5:],  # Include only the last 5 samples
-        }
-    
-    # Process error metrics
-    for name, metrics in _metrics["errors"].items():
-        result["errors"][name] = {
-            "count": metrics["count"],
-            "recent_occurrences": metrics["occurrences"][-5:],  # Include only the last 5 occurrences
-        }
-    
-    # Process model-specific metrics
-    for model_name, model_metrics in _metrics["token_usage"]["models"].items():
-        result["token_usage"]["models"][model_name] = {
-            "total_tokens": model_metrics["total_tokens"],
-            "prompt_tokens": model_metrics["prompt_tokens"],
-            "completion_tokens": model_metrics["completion_tokens"],
-            "total_cost": round(model_metrics["total_cost"], 6),
-            "operations": model_metrics["operations"]
-        }
-    
-    return result
+    def calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        """Calculate the cost for a given number of tokens"""
+        input_cost = input_tokens * self.input_cost_per_token
+        output_cost = output_tokens * self.output_cost_per_token
+        total_cost = input_cost + output_cost
+        return total_cost
 
-def reset_metrics() -> None:
-    """Reset all metrics to their initial state."""
-    global _metrics
-    _metrics = {
-        "operations": {},
-        "counters": {},
-        "performance": {},
-        "errors": {},
-        "token_usage": {
-            "total_tokens": 0,
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_cost": 0.0,
-            "models": {},
-        },
-    }
+class Usage(BaseModel):
+    """Tracks token usage for a single operation"""
+    prompt_tokens: int = Field(default=0, description="Number of tokens in the prompt")
+    completion_tokens: int = Field(default=0, description="Number of tokens in the completion")
+    total_tokens: int = Field(default=0, description="Total tokens used")
+    cost: float = Field(default=0.0, description="Calculated cost of the operation")
+    model: str = Field(default="default", description="Model used for this operation")
     
-    # Also clear thread-local storage
-    if hasattr(_local, 'operations'):
-        _local.operations = {} 
+    def calculate_cost(self, model_name: str) -> float:
+        """Calculate cost based on model and update the cost field"""
+        costs = ModelCosts.for_model(model_name)
+        
+        # Calculate actual costs in dollars
+        prompt_cost = self.prompt_tokens * costs.input_cost_per_token
+        completion_cost = self.completion_tokens * costs.output_cost_per_token
+        
+        # Store the actual dollar cost without any multiplier
+        self.cost = round(prompt_cost + completion_cost, 6)
+        
+        self.model = model_name
+        return self.cost
+    
+    def add(self, other: "Usage") -> "Usage":
+        """Add another usage to this one - used for tracking cumulative usage"""
+        self.prompt_tokens += other.prompt_tokens
+        self.completion_tokens += other.completion_tokens
+        self.total_tokens = self.prompt_tokens + self.completion_tokens
+        # Recalculate cost if model is known
+        if self.model and self.model != "default":
+            self.calculate_cost(self.model)
+        return self
+
+def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage:
+    """
+    Extract token usage information from a Pydantic AI result.
+    
+    The function handles Pydantic AI's usage format which returns:
+    Usage(requests=n, request_tokens=x, response_tokens=y, total_tokens=z, details={...})
+    
+    Returns a standardized Usage object with the extracted information.
+    """
+    usage = Usage(model=model_name)
+    
+    # Return empty usage if no result
+    if result is None:
+        logger.warning("No result provided to extract_usage_from_result")
+        return usage
+    
+    try:
+        # Get usage data from the Pydantic AI result
+        if hasattr(result, "usage") and callable(result.usage):
+            usage_data = result.usage()
+            
+            # Validate that we have a usage object with the expected fields
+            if usage_data is None:
+                logger.warning("Result has usage method but it returned None")
+                return usage
+            
+            # Map the Pydantic AI usage fields to our Usage object fields
+            # Check each attribute individually to handle different usage formats
+            if hasattr(usage_data, "request_tokens"):
+                usage.prompt_tokens = usage_data.request_tokens
+                
+            if hasattr(usage_data, "response_tokens"):
+                usage.completion_tokens = usage_data.response_tokens
+                
+            if hasattr(usage_data, "total_tokens"):
+                usage.total_tokens = usage_data.total_tokens
+            # If total_tokens not available but we have request and response tokens, calculate it
+            elif usage.prompt_tokens > 0 or usage.completion_tokens > 0:
+                usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
+            
+            # Calculate the cost based on the token counts and model - for this individual result
+            if usage.total_tokens > 0:
+                usage.calculate_cost(model_name)
+                logger.debug(
+                    f"Extracted usage metrics", 
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    cost=usage.cost,
+                    model=model_name
+                )
+            else:
+                logger.warning(
+                    f"Zero tokens in usage data", 
+                    model=model_name,
+                    usage_data=str(usage_data)
+                )
+        else:
+            logger.warning("Result has no callable usage method")
+    
+    except Exception as e:
+        logger.error(
+            f"Error extracting usage from result: {e}",
+            model=model_name,
+            error_type=type(e).__name__
+        )
+    
+    return usage

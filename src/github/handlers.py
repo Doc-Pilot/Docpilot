@@ -288,30 +288,41 @@ async def process_api_files(repo_name: str, branch: str, file_paths: List[str]) 
         results = {}
         api_doc_generator = APIDocGenerator()
         
+        if not file_paths:
+            return {"status": "skipped", "reason": "No API files provided"}
+            
+        # In a real implementation, you would get actual file content from GitHub
+        # For this example, we'll use a simplified approach
+        api_file_contents = []
         for file_path in file_paths:
-            # In a real implementation, you would get file content from GitHub
-            # For this example, we'll simulate it with placeholder content
+            # Simulate getting file content
             file_content = "# Placeholder API content"
-            
-            # Determine the language and framework based on file extension
-            language, framework = _detect_language_and_framework(file_path)
-            
-            api_doc_result = await api_doc_generator.generate_api_docs(
-                APIDocInput(
-                    code=file_content,
-                    api_name=f"{repo_name} API",
-                    language=language,
-                    framework=framework
-                )
+            api_file_contents.append((file_path, file_content))
+        
+        # Determine the language and framework based on first file extension
+        language, framework = _detect_language_and_framework(file_paths[0])
+        
+        # Get repository description as a placeholder
+        repo_description = f"API documentation for {repo_name}"
+        
+        api_doc_result = await api_doc_generator.generate_api_docs(
+            APIDocInput(
+                code=api_file_contents[0][1],  # Use first file content as main code
+                api_name=f"{repo_name} API",
+                language=language,
+                framework=framework,
+                api_files=api_file_contents,
+                project_description=repo_description
             )
-            
-            results[file_path] = {
-                "title": api_doc_result.title,
-                "version": api_doc_result.version,
-                "description": api_doc_result.description,
-                "endpoints": len(api_doc_result.endpoints),
-                "markdown": api_doc_result.markdown
-            }
+        )
+        
+        results = {
+            "title": api_doc_result.title,
+            "version": api_doc_result.version,
+            "description": api_doc_result.description,
+            "endpoints": len(api_doc_result.endpoints),
+            "markdown": api_doc_result.markdown
+        }
             
         return results
     

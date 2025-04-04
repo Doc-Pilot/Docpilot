@@ -9,56 +9,76 @@ It provides a hierarchical representation of the repository optimized for LLM un
 import os
 import re
 import fnmatch
-from typing import Dict, Any, List, Set, Optional, Tuple
-from collections import defaultdict, Counter
+from typing import List, Dict, Any, Optional, Set
+import logging
+import pathspec
+
+logger = logging.getLogger(__name__)
 
 class RepoScanner:
     """
     Scans repositories and provides analysis of their structure.
     """
     
-    def __init__(self, repo_path: str, exclude_patterns: Optional[List[str]] = None):
+    def __init__(
+        self,
+        repo_path: str,
+        include_patterns: List[str] = None,
+        exclude_patterns: List[str] = None,
+        use_gitignore: bool = True
+    ):
         """
         Initialize the repository scanner.
         
         Args:
             repo_path: Path to the repository
-            exclude_patterns: Patterns to exclude from scanning
+            include_patterns: List of glob patterns to include
+            exclude_patterns: List of glob patterns to exclude
+            use_gitignore: Whether to use .gitignore patterns
         """
-        self.repo_path = os.path.abspath(repo_path)
-        self.exclude_patterns = exclude_patterns or []
+        self.repo_path = repo_path
+        self.include_patterns = include_patterns or ["*"]
         
-        # Add default exclude patterns for common files/directories to ignore
-        default_excludes = [
-            ".git", 
-            "__pycache__", 
-            "*.pyc", 
-            "node_modules",
-            "venv", 
-            ".venv", 
-            ".env",
-            ".pytest_cache",
-            ".coverage",
-            ".DS_Store",
-            ".idea",
-            ".vscode",
-            "*.log",
-            "build",
-            "dist",
-            "*.egg-info",
-            "__MACOSX",
-            "*.min.js",  # Minified files aren't helpful for analysis
-            "*.min.css",
-            ".github",
-            ".gradle",
-            ".next",
-            ".nuxt",
+        # Default exclude patterns
+        default_exclude_patterns = [
+            # Common patterns to exclude
+            "**/.git/**", "**/node_modules/**", "**/venv/**", "**/__pycache__/**",
+            "**/.pytest_cache/**", "**/.vscode/**", "**/.idea/**", "**/build/**",
+            "**/dist/**", "**/out/**", "**/target/**", "**/.DS_Store",
+            "**/.env", "**/.env.*", "**/.gitignore", "**/.gitattributes",
+            "**/coverage/**", "**/logs/**", "**/*.log", "**/*.pyc", "**/*.pyo",
+            "**/yarn.lock", "**/package-lock.json", "**/Pipfile.lock", "**/poetry.lock",
+            "**/tmp/**", "**/.cache/**", "**/.docker/**", "**/bin/**", "**/obj/**",
+            "**/*.egg-info/**", "**/*~", "**/*.swp", "**/*.swo", "**/Thumbs.db"
         ]
         
-        # Combine with user-provided patterns
-        self.exclude_patterns = list(set(self.exclude_patterns + default_excludes))
-    
-    def get_all_files(self) -> List[str]:
+        # Use provided exclude patterns or default ones
+        self.exclude_patterns = exclude_patterns or default_exclude_patterns
+        
+        # Setup pathspec for gitignore
+        self.gitignore_spec = None
+        if use_gitignore:
+            self._load_gitignore()
+        
+    def _load_gitignore(self):
+        """Load .gitignore file and create a spec for matching"""
+        gitignore_path = os.path.join(self.repo_path, '.gitignore')
+        if os.path.exists(gitignore_path):
+            with open(gitignore_path, 'r', encoding='utf-8') as f:
+                gitignore_content = f.read()
+                
+            try:
+                # Create gitignore spec
+                self.gitignore_spec = pathspec.PathSpec.from_lines(
+                    pathspec.patterns.GitWildMatchPattern, 
+                    gitignore_content.splitlines()
+                )
+                logger.info(f"Loaded .gitignore file with {len(self.gitignore_spec.patterns)} patterns")
+            except Exception as e:
+                logger.warning(f"Error loading .gitignore file: {str(e)}")
+                self.gitignore_spec = None
+        
+    def scan_files(self) -> List[str]:
         """
         Get all files in the repository, respecting exclude patterns.
         
@@ -68,15 +88,15 @@ class RepoScanner:
         all_files = []
         
         for root, dirs, files in os.walk(self.repo_path):
-            # Apply exclude patterns to directories (modifies dirs in place)
-            for pattern in self.exclude_patterns:
-                if pattern.endswith('/'):
-                    pattern = pattern[:-1]
-                dirs_to_remove = [d for d in dirs if fnmatch.fnmatch(d, pattern)]
-                for d in dirs_to_remove:
-                    dirs.remove(d)
+            # Skip directories matching gitignore patterns
+            if self.gitignore_spec:
+                # Get relative paths for directories
+                rel_dirs = [os.path.relpath(os.path.join(root, d), self.repo_path) for d in dirs]
+                # Filter out directories that match gitignore patterns
+                for i, (d, rel_path) in enumerate(zip(dirs[:], rel_dirs)):
+                    if self.gitignore_spec.match_file(rel_path) or self.gitignore_spec.match_file(f"{rel_path}/"):
+                        dirs.remove(d)
             
-            # Apply exclude patterns to files
             for file in files:
                 file_path = os.path.join(root, file)
                 rel_path = os.path.relpath(file_path, self.repo_path)
@@ -302,24 +322,29 @@ class RepoScanner:
             tree: Tree structure to sort
             
         Returns:
-            Sorted tree structure
+            True if the file should be included, False otherwise
         """
-        result = {}
+        # Convert Windows path separators to Unix style for pattern matching
+        file_path = file_path.replace('\\', '/')
         
-        # Sort directories
-        if "dirs" in tree:
-            sorted_dirs = {}
-            for dir_name in sorted(tree["dirs"].keys()):
-                sorted_dirs[dir_name] = self._sort_tree(tree["dirs"][dir_name])
-            result["dirs"] = sorted_dirs
+        # Check if the file matches gitignore patterns
+        if self.gitignore_spec and self.gitignore_spec.match_file(file_path):
+            return False
         
-        # Sort files
-        if "files" in tree:
-            result["files"] = sorted(tree["files"])
+        # Check exclude patterns first
+        for pattern in self.exclude_patterns:
+            if fnmatch.fnmatch(file_path, pattern):
+                return False
         
-        return result
+        # Then check include patterns
+        for pattern in self.include_patterns:
+            if fnmatch.fnmatch(file_path, pattern):
+                return True
+        
+        # If no include pattern matches, exclude the file
+        return False
     
-    def find_related_files(self, files: List[str]) -> Dict[str, List[str]]:
+    def get_file_extension_breakdown(self, file_list: List[str]) -> Dict[str, int]:
         """
         Group related files based on naming patterns and directory structure.
         
