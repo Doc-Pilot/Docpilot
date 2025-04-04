@@ -12,6 +12,7 @@ import fnmatch
 from typing import List, Dict, Any, Optional, Set
 import logging
 import pathspec
+from collections import defaultdict, Counter
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +74,9 @@ class RepoScanner:
                     pathspec.patterns.GitWildMatchPattern, 
                     gitignore_content.splitlines()
                 )
-                logger.info(f"Loaded .gitignore file with {len(self.gitignore_spec.patterns)} patterns")
             except Exception as e:
-                logger.warning(f"Error loading .gitignore file: {str(e)}")
+                # Only log serious errors, with minimal details
+                logger.warning(f"Failed to parse .gitignore: {str(e)}")
                 self.gitignore_spec = None
         
     def scan_files(self) -> List[str]:
@@ -122,7 +123,7 @@ class RepoScanner:
             Dictionary of technology categories and detected technologies
         """
         # Get all files
-        files = self.get_all_files()
+        files = self.scan_files()
         
         # Define patterns for technology detection
         technology_patterns = {
@@ -289,7 +290,7 @@ class RepoScanner:
         Returns:
             Dictionary representing the repository directory structure
         """
-        files = self.get_all_files()
+        files = self.scan_files()
         
         # Create a tree structure
         tree = {}
@@ -322,6 +323,30 @@ class RepoScanner:
             tree: Tree structure to sort
             
         Returns:
+            Sorted tree structure
+        """
+        result = {}
+        
+        # Sort and add directories
+        if "dirs" in tree:
+            result["dirs"] = {}
+            for name in sorted(tree["dirs"].keys()):
+                result["dirs"][name] = self._sort_tree(tree["dirs"][name])
+        
+        # Sort and add files
+        if "files" in tree:
+            result["files"] = sorted(tree["files"])
+        
+        return result
+    
+    def _should_include_file(self, file_path: str) -> bool:
+        """
+        Check if a file should be included based on patterns and gitignore rules.
+        
+        Args:
+            file_path: Path to check
+            
+        Returns:
             True if the file should be included, False otherwise
         """
         # Convert Windows path separators to Unix style for pattern matching
@@ -344,12 +369,12 @@ class RepoScanner:
         # If no include pattern matches, exclude the file
         return False
     
-    def get_file_extension_breakdown(self, file_list: List[str]) -> Dict[str, int]:
+    def get_file_extension_breakdown(self, file_list: List[str]) -> Dict[str, List[str]]:
         """
         Group related files based on naming patterns and directory structure.
         
         Args:
-            files: List of file paths
+            file_list: List of file paths
             
         Returns:
             Dictionary of base names and related files
@@ -357,7 +382,7 @@ class RepoScanner:
         related_files = defaultdict(list)
         
         # Group by common base name
-        for file_path in files:
+        for file_path in file_list:
             filename = os.path.basename(file_path)
             name, ext = os.path.splitext(filename)
             
@@ -592,7 +617,7 @@ class RepoScanner:
             Dictionary containing analysis results
         """
         # Get all files
-        files = self.get_all_files()
+        files = self.scan_files()
         
         # Detect frameworks and technologies
         technologies = self.detect_frameworks()
@@ -601,7 +626,7 @@ class RepoScanner:
         directory_tree = self.create_directory_tree()
         
         # Find related files
-        related_files = self.find_related_files(files)
+        related_files = self.get_file_extension_breakdown(files)
         
         # Identify modules
         modules = self.identify_modules(files)
