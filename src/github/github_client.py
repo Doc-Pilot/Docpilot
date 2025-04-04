@@ -2,12 +2,14 @@ import os
 import base64
 import logging
 from typing import Dict, List, Any, Optional
+from datetime import datetime, timedelta
 import requests
 import github
 from github import Github, GithubIntegration
 from github.GithubException import GithubException
 
-from utils.config import get_settings
+from ..utils.config import get_settings
+from .installation_store import InstallationStore
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ class GitHubClient:
     
     def __init__(self):
         self.settings = get_settings()
+        self.installation_store = InstallationStore()
         self._init_github_client()
         
     def _init_github_client(self):
@@ -34,14 +37,16 @@ class GitHubClient:
                 )
                 self.github_app = integration
                 self.github = None  # Will be initialized per-repo
+                logger.info(f"Initialized GitHub App client with App ID: {self.settings.github_app_id}")
             else:
                 # Fallback to personal access token if available in environment
-                github_token = os.getenv("GITHUB_TOKEN")
+                github_token = self.settings.github_token or os.getenv("GITHUB_TOKEN")
                 if not github_token:
                     raise ValueError("No GitHub authentication credentials available")
                     
                 self.github = Github(github_token)
                 self.github_app = None
+                logger.info("Initialized GitHub client with personal access token")
                 
         except Exception as e:
             logger.exception(f"Error initializing GitHub client: {str(e)}")
@@ -68,17 +73,96 @@ class GitHubClient:
             raise ValueError("No GitHub authentication available")
             
         try:
-            # Get the GitHub App installation for this repository
+            # Extract owner and repo name
             owner, repo = repo_name.split('/')
-            installation_id = self.github_app.get_installation(owner, repo).id
+            
+            # Try to find an existing installation with valid token
+            installation = await self.installation_store.find_installation_for_repo(owner, repo)
+            
+            if installation:
+                # Check if we have a valid token for this installation
+                installation_id = installation["installation_id"]
+                token = await self.installation_store.get_valid_token(installation_id)
+                
+                if token:
+                    logger.debug(f"Using cached token for installation {installation_id}")
+                    return Github(token)
+            
+            # No valid token found, need to get a new one
+            logger.debug(f"Getting fresh installation token for {repo_name}")
+            
+            # Get the GitHub App installation for this repository
+            try:
+                installation_id = self.github_app.get_installation(owner, repo).id
+            except Exception as e:
+                logger.exception(f"Error getting installation for {repo_name}: {str(e)}")
+                raise ValueError(f"No GitHub App installation found for {repo_name}")
             
             # Create an access token for this installation
-            access_token = self.github_app.get_access_token(installation_id).token
+            token_data = self.github_app.get_access_token(installation_id)
+            access_token = token_data.token
+            
+            # Parse expiration time
+            # The token usually expires in 1 hour
+            expires_at = datetime.now() + timedelta(seconds=3600)
+            
+            # Store the token in our installation store
+            await self.installation_store.update_token(
+                installation_id=str(installation_id),
+                access_token=access_token,
+                expires_at=expires_at
+            )
             
             # Create a Github instance with this token
             return Github(access_token)
         except Exception as e:
             logger.exception(f"Error getting GitHub client for {repo_name}: {str(e)}")
+            raise
+    
+    async def refresh_installation_repositories(self, installation_id: str) -> List[str]:
+        """
+        Refresh the list of repositories for an installation
+        
+        Args:
+            installation_id: Installation ID
+            
+        Returns:
+            List of repository full names
+        """
+        if not self.github_app:
+            raise ValueError("GitHub App authentication not configured")
+            
+        try:
+            # Get installation info from GitHub
+            token_data = self.github_app.get_access_token(int(installation_id))
+            gh_client = Github(token_data.token)
+            
+            # Get installation
+            installation = gh_client.get_app_installation(int(installation_id))
+            
+            # Get account info
+            account = installation.account
+            account_name = account.login
+            account_type = account.type
+            
+            # Get repositories
+            repositories = []
+            for repo in installation.get_repos():
+                repositories.append(repo.full_name)
+                
+            # Update installation data
+            await self.installation_store.add_installation(
+                installation_id=installation_id,
+                account_name=account_name,
+                account_type=account_type,
+                repositories=repositories,
+                access_token=token_data.token,
+                token_expires_at=datetime.now() + timedelta(seconds=3600)
+            )
+            
+            return repositories
+        except Exception as e:
+            logger.exception(f"Error refreshing repositories for installation {installation_id}: {str(e)}")
             raise
     
     async def get_file_content(

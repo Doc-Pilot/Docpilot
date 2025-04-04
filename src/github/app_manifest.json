@@ -1,0 +1,23 @@
+{
+  "name": "Docpilot",
+  "url": "https://github.com/marketplace/docpilot",
+  "hook_attributes": {
+    "url": "https://example.com/api/github/webhook"
+  },
+  "redirect_url": "https://example.com/api/github/callback",
+  "public": true,
+  "default_permissions": {
+    "contents": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "issues": "write",
+    "workflows": "read"
+  },
+  "default_events": [
+    "push",
+    "pull_request",
+    "issues"
+  ],
+  "description": "AI-Powered Documentation Assistant for GitHub",
+  "categories": ["documentation", "code quality", "ai tools"]
+} 
