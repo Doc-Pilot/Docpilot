@@ -2,34 +2,28 @@
 GitHub Webhook Handler
 =====================
 
-Handles GitHub webhooks to trigger documentation update pipelines.
+Simple handler for GitHub webhooks to test integration with GitHub Apps.
 """
 
-import os
 import json
 import logging
-import asyncio
-import tempfile
-import subprocess
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
-from ..pipelines.doc_update_pipeline import DocumentationUpdatePipeline
 from ..utils.logging import logger
 
 class WebhookHandler:
     """
-    Handles GitHub webhooks to trigger documentation update pipelines.
+    Simple handler for GitHub webhooks to test integration.
     
-    This handler processes various GitHub webhook events, such as:
-    - push: When code is pushed directly to a branch
-    - pull_request: When a PR is opened, updated, or merged
+    This handler processes various GitHub webhook events and logs them
+    without performing any actual document updates.
     """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the webhook handler"""
         self.config = config or {}
-        self.pipeline = DocumentationUpdatePipeline()
+        logger.info("Initialized webhook handler in test mode")
         
     async def handle_webhook(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -42,18 +36,78 @@ class WebhookHandler:
         Returns:
             Dictionary with handling results
         """
-        logger.info(f"Handling GitHub webhook event: {event_type}")
+        logger.info(f"Received GitHub webhook event: {event_type}")
         
+        # Log the payload summary
+        self._log_payload_summary(event_type, payload)
+        
+        # Handle different event types
         if event_type == "push":
             return await self.handle_push_event(payload)
         elif event_type == "pull_request":
             return await self.handle_pull_request_event(payload)
+        elif event_type == "ping":
+            return self.handle_ping_event(payload)
+        elif event_type == "installation" or event_type == "installation_repositories":
+            return await self.handle_installation_event(payload)
         else:
-            logger.info(f"Ignoring unsupported event type: {event_type}")
+            logger.info(f"Received unsupported event type: {event_type}")
             return {
                 "success": True,
-                "message": f"Event type {event_type} is not supported"
+                "message": f"Event type {event_type} acknowledged but not processed",
+                "event_type": event_type
             }
+    
+    def _log_payload_summary(self, event_type: str, payload: Dict[str, Any]) -> None:
+        """Log a summary of the webhook payload"""
+        try:
+            # Common information
+            repo = payload.get("repository", {}).get("full_name", "N/A")
+            sender = payload.get("sender", {}).get("login", "N/A")
+            
+            # Event-specific information
+            if event_type == "push":
+                ref = payload.get("ref", "N/A")
+                before = payload.get("before", "N/A")[:7]
+                after = payload.get("after", "N/A")[:7]
+                
+                commit_count = len(payload.get("commits", []))
+                
+                logger.info(f"Push event: {sender} pushed {commit_count} commit(s) to {ref} in {repo} ({before}...{after})")
+                
+            elif event_type == "pull_request":
+                action = payload.get("action", "N/A")
+                pr_number = payload.get("number", "N/A")
+                pr_title = payload.get("pull_request", {}).get("title", "N/A")
+                base = payload.get("pull_request", {}).get("base", {}).get("ref", "N/A")
+                head = payload.get("pull_request", {}).get("head", {}).get("ref", "N/A")
+                
+                logger.info(f"Pull request event: {sender} {action} PR #{pr_number} '{pr_title}' ({head} → {base}) in {repo}")
+                
+            elif event_type == "ping":
+                hook_id = payload.get("hook_id", "N/A")
+                hook_url = payload.get("hook", {}).get("config", {}).get("url", "N/A")
+                
+                logger.info(f"Ping event: Webhook ID {hook_id} configured with URL {hook_url} for {repo}")
+                
+            elif event_type == "installation" or event_type == "installation_repositories":
+                action = payload.get("action", "N/A")
+                installation_id = payload.get("installation", {}).get("id", "N/A")
+                account = payload.get("installation", {}).get("account", {}).get("login", "N/A")
+                
+                if event_type == "installation":
+                    repos_count = len(payload.get("repositories", []))
+                    logger.info(f"Installation event: {account} {action} app (ID: {installation_id}) with {repos_count} repositories")
+                else:
+                    repos_added = len(payload.get("repositories_added", []))
+                    repos_removed = len(payload.get("repositories_removed", []))
+                    logger.info(f"Installation repositories event: {account} {action} - added {repos_added}, removed {repos_removed} repositories")
+            
+            else:
+                logger.info(f"Generic {event_type} event from {sender} for {repo}")
+                
+        except Exception as e:
+            logger.error(f"Error logging payload summary: {str(e)}")
     
     async def handle_push_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -68,7 +122,6 @@ class WebhookHandler:
         # Extract repository information
         repo_info = payload.get("repository", {})
         repo_name = repo_info.get("full_name", "")
-        repo_url = repo_info.get("clone_url", "")
         
         # Extract push information
         ref = payload.get("ref", "")  # e.g., "refs/heads/main"
@@ -78,60 +131,21 @@ class WebhookHandler:
         before_sha = payload.get("before", "")
         after_sha = payload.get("after", "")
         
-        # Check if this is a branch creation or deletion
-        if before_sha == "0000000000000000000000000000000000000000":
-            logger.info(f"Branch creation detected for {branch}, skipping documentation update")
-            return {
-                "success": True,
-                "message": f"Branch creation for {branch}, no documentation update needed"
-            }
-            
-        if after_sha == "0000000000000000000000000000000000000000":
-            logger.info(f"Branch deletion detected for {branch}, skipping documentation update")
-            return {
-                "success": True,
-                "message": f"Branch deletion for {branch}, no documentation update needed"
-            }
+        # Commits info
+        commits = payload.get("commits", [])
+        commit_count = len(commits)
         
-        # Check if it's a protected branch that should trigger documentation updates
-        if not self._should_process_branch(branch):
-            logger.info(f"Ignoring push to non-protected branch: {branch}")
-            return {
-                "success": True,
-                "message": f"Branch {branch} is not configured for automatic documentation updates"
-            }
-            
-        # Clone the repository to a temporary directory
-        repo_dir, success, error = await self._clone_repository(repo_url)
-        if not success:
-            return {
-                "success": False,
-                "error": f"Failed to clone repository: {error}"
-            }
-            
-        try:
-            # Run the documentation update pipeline
-            result = await self.pipeline.run_pipeline(
-                repo_path=repo_dir,
-                base_ref=before_sha,
-                target_ref=after_sha,
-                create_pr=True
-            )
-            
-            # Clean up the temporary directory
-            self._cleanup_repository(repo_dir)
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error processing push event: {str(e)}")
-            
-            # Clean up the temporary directory
-            self._cleanup_repository(repo_dir)
-            
-            return {
-                "success": False,
-                "error": f"Failed to process push event: {str(e)}"
-            }
+        # For testing, just log and return success
+        logger.info(f"Push event handled: {commit_count} commit(s) to {branch} in {repo_name}")
+        
+        return {
+            "success": True,
+            "message": f"Push to {branch} in {repo_name} successfully received",
+            "event_type": "push",
+            "repository": repo_name,
+            "branch": branch,
+            "commits": commit_count
+        }
     
     async def handle_pull_request_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -146,125 +160,83 @@ class WebhookHandler:
         # Extract repository information
         repo_info = payload.get("repository", {})
         repo_name = repo_info.get("full_name", "")
-        repo_url = repo_info.get("clone_url", "")
         
         # Extract PR information
         pr_info = payload.get("pull_request", {})
         pr_number = pr_info.get("number", 0)
+        pr_title = pr_info.get("title", "")
         pr_action = payload.get("action", "")
         
-        # Check if this is a PR merge
-        if pr_action != "closed" or not pr_info.get("merged", False):
-            logger.info(f"Ignoring PR {pr_number} {pr_action} action, not a merge")
-            return {
-                "success": True,
-                "message": f"PR {pr_number} {pr_action} action, not a merge"
-            }
-            
         # Extract branch information
         base_branch = pr_info.get("base", {}).get("ref", "")
         head_branch = pr_info.get("head", {}).get("ref", "")
         
-        # Check if it's a PR to a protected branch that should trigger documentation updates
-        if not self._should_process_branch(base_branch):
-            logger.info(f"Ignoring PR merge to non-protected branch: {base_branch}")
-            return {
-                "success": True,
-                "message": f"Branch {base_branch} is not configured for automatic documentation updates"
-            }
-            
-        # Get the merge commit SHA
-        merge_commit_sha = pr_info.get("merge_commit_sha", "")
+        # Check if this is a PR merge
+        is_merged = False
+        if pr_action == "closed" and pr_info.get("merged", False):
+            is_merged = True
         
-        # Clone the repository to a temporary directory
-        repo_dir, success, error = await self._clone_repository(repo_url)
-        if not success:
-            return {
-                "success": False,
-                "error": f"Failed to clone repository: {error}"
-            }
-            
-        try:
-            # Run the documentation update pipeline
-            result = await self.pipeline.run_pipeline(
-                repo_path=repo_dir,
-                base_ref=f"{merge_commit_sha}~1",
-                target_ref=merge_commit_sha,
-                create_pr=True
-            )
-            
-            # Clean up the temporary directory
-            self._cleanup_repository(repo_dir)
-            
-            return result
-        except Exception as e:
-            logger.error(f"Error processing PR merge event: {str(e)}")
-            
-            # Clean up the temporary directory
-            self._cleanup_repository(repo_dir)
-            
-            return {
-                "success": False,
-                "error": f"Failed to process PR merge event: {str(e)}"
-            }
+        # For testing, just log and return success
+        action_text = f"{pr_action} (merged: {is_merged})" if pr_action == "closed" else pr_action
+        logger.info(f"PR event handled: {action_text} PR #{pr_number} '{pr_title}' ({head_branch} → {base_branch}) in {repo_name}")
+        
+        return {
+            "success": True,
+            "message": f"PR #{pr_number} {action_text} in {repo_name} successfully received",
+            "event_type": "pull_request",
+            "repository": repo_name,
+            "pr_number": pr_number,
+            "action": pr_action,
+            "is_merged": is_merged,
+            "base_branch": base_branch,
+            "head_branch": head_branch
+        }
     
-    def _should_process_branch(self, branch: str) -> bool:
+    def handle_ping_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Check if a branch should trigger documentation updates.
+        Handle a ping event.
         
         Args:
-            branch: The branch name
+            payload: The webhook payload from GitHub
             
         Returns:
-            True if the branch should be processed, False otherwise
+            Dictionary with handling results
         """
-        # List of branches that should trigger documentation updates
-        protected_branches = self.config.get("protected_branches", ["main", "master"])
+        hook_id = payload.get("hook_id", "N/A")
+        hook_url = payload.get("hook", {}).get("config", {}).get("url", "N/A")
         
-        return branch in protected_branches
+        logger.info(f"Ping event handled! Webhook ID: {hook_id}")
+        
+        return {
+            "success": True,
+            "message": "Pong! Webhook is configured correctly",
+            "event_type": "ping",
+            "hook_id": hook_id,
+            "zen": payload.get("zen", "")
+        }
     
-    async def _clone_repository(self, repo_url: str) -> Tuple[str, bool, Optional[str]]:
+    async def handle_installation_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Clone a repository to a temporary directory.
+        Handle an installation event.
         
         Args:
-            repo_url: The URL of the repository to clone
+            payload: The webhook payload from GitHub
             
         Returns:
-            Tuple of (repo_dir, success, error)
+            Dictionary with handling results
         """
-        # Create a temporary directory
-        repo_dir = tempfile.mkdtemp(prefix="docpilot-")
+        action = payload.get("action", "")
+        installation_id = payload.get("installation", {}).get("id", "")
+        account = payload.get("installation", {}).get("account", {}).get("login", "")
         
-        try:
-            # Clone the repository
-            process = await asyncio.create_subprocess_exec(
-                "git", "clone", repo_url, repo_dir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0:
-                error = stderr.decode().strip()
-                return repo_dir, False, error
-                
-            return repo_dir, True, None
-            
-        except Exception as e:
-            return repo_dir, False, str(e)
-    
-    def _cleanup_repository(self, repo_dir: str) -> None:
-        """
-        Clean up a temporary repository directory.
+        # For testing, just log and return success
+        logger.info(f"Installation event handled: {account} {action} (ID: {installation_id})")
         
-        Args:
-            repo_dir: The directory to clean up
-        """
-        try:
-            import shutil
-            shutil.rmtree(repo_dir)
-        except Exception as e:
-            logger.error(f"Error cleaning up repository directory: {str(e)}")
-            # Continue anyway 
+        return {
+            "success": True,
+            "message": f"GitHub App {action} by {account}",
+            "event_type": payload.get("event_type", "installation"),
+            "installation_id": installation_id,
+            "account": account,
+            "action": action
+        } 
