@@ -190,13 +190,14 @@ def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage
             if usage.total_tokens > 0:
                 usage.calculate_cost(model_name)
             else:
-                # Only log real issues, not expected cases
-                if usage_data and (hasattr(usage_data, "request_tokens") or hasattr(usage_data, "response_tokens")):
-                    logger.warning(f"Zero tokens reported in usage data for {model_name}")
+                usage.cost = 0.0
     
     except Exception as e:
-        # Only log actual exceptions
-        logger.error(f"Failed to extract usage metrics: {e}")
+        return Usage(prompt_tokens=0,
+                     completion_tokens=0,
+                     total_tokens=0,
+                     cost=0.0,
+                     model="Error: " + str(e))
     
     # Ensure we return a valid Usage object
     return usage
