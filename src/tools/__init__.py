@@ -9,7 +9,7 @@ that can be called directly or via an agent system.
 Categories:
 - Code Analysis: Tools for parsing and analyzing code structure
 - Documentation: Tools for generating and evaluating documentation
-- Repository: Tools for analyzing repository structure
+- Repository: Tools for analyzing repository structure and APIs
 """
 
 # Import all tools for direct access from tools module
@@ -37,13 +37,10 @@ from .doc_tools import (
 
 from .repo_tools import (
     scan_repository,
+    generate_repo_tree,
     get_tech_stack,
     get_code_files,
-    get_directory_structure,
-    get_module_files,
-    find_important_files,
-    analyze_file_relationships,
-    get_repository_summary
+    identify_api_components
 )
 
 # Make all functions available at module level
@@ -70,11 +67,8 @@ __all__ = [
     
     # Repository tools
     "scan_repository",
+    "generate_repo_tree",
     "get_tech_stack",
     "get_code_files",
-    "get_directory_structure",
-    "get_module_files",
-    "find_important_files",
-    "analyze_file_relationships",
-    "get_repository_summary"
+    "identify_api_components"
 ] 

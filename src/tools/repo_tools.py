@@ -2,77 +2,98 @@
 Repository Analysis Tools
 ======================
 
-This module provides functions for scanning and analyzing repositories.
-These functions are optimized for tool calling by LLMs with standardized input parameters and return formats.
+This module provides LLM-friendly functions for scanning and analyzing repositories.
+These wrapper functions use the core RepoScanner utility with standardized input/output formats.
 """
 
 import os
 import json
-from typing import Dict, List, Any, Optional, Union, Set
+from typing import Dict, List, Any, Optional, Union, Set, Tuple
 from pathlib import Path
+import logging
+from collections import defaultdict
 
-from ..utils.repo_scanner import RepoScanner
+from ..utils import RepoScanner
 
-def scan_repository(repo_path: str, include_patterns: List[str] = None, exclude_patterns: List[str] = None) -> Dict[str, Any]:
+logger = logging.getLogger(__name__)
+
+def scan_repository(repo_path: str, 
+                   include_patterns: List[str] = None,
+                   exclude_patterns: List[str] = None,
+                   use_gitignore: bool = True) -> Dict[str, Any]:
     """
-    Scan a repository and provide a comprehensive analysis of its structure.
+    Scan and analyze a repository for documentation purposes.
     
     Args:
         repo_path: Path to the repository
-        include_patterns: Optional list of glob patterns to include
-        exclude_patterns: Optional list of glob patterns to exclude
+        include_patterns: List of glob patterns to include
+        exclude_patterns: List of glob patterns to exclude
+        use_gitignore: Whether to use .gitignore patterns
         
     Returns:
-        Dictionary with repository analysis results
+        Dictionary containing analysis results
     """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
     try:
-        # Initialize repository scanner with optional patterns
+        # Normalize repository path
+        repo_path = os.path.abspath(repo_path)
+        if not os.path.exists(repo_path):
+            return {
+                "success": False,
+                "message": f"Repository path does not exist: {repo_path}",
+                "file_count": 0
+            }
+            
         scanner = RepoScanner(
             repo_path=repo_path,
             include_patterns=include_patterns,
-            exclude_patterns=exclude_patterns
+            exclude_patterns=exclude_patterns,
+            use_gitignore=use_gitignore
         )
         
-        # Perform comprehensive analysis
+        # Get analysis results
         analysis = scanner.analyze_repository()
+        files = analysis.get("files", [])
         
-        # Add success flag and format the response for LLM consumption
+        # Format response for LLM consumption (simplified)
         result = {
             "success": True,
-            "message": f"Repository analysis completed successfully with {analysis.get('file_count', 0)} files",
-            "file_count": analysis.get("file_count", 0),
-            "technologies": analysis.get("technologies", {}),
-            "languages": analysis.get("languages", {}),
-            "extension_breakdown": analysis.get("extension_breakdown", {}),
-            "directory_structure": analysis.get("directory_tree", {})
+            "message": f"Repository analysis completed successfully with {len(files)} files",
+            "file_count": len(files),
+            "files": files[:25] if len(files) > 25 else files,  # Limit file list to first 25
         }
         
-        # Add module information
-        modules = analysis.get("modules", {})
-        if modules:
-            result["modules"] = {}
-            for module_name, files in modules.items():
-                # Limit the number of files shown for each module to avoid overwhelming responses
-                result["modules"][module_name] = {
-                    "file_count": len(files),
-                    "sample_files": files[:5] if len(files) > 5 else files
-                }
-        
-        # Add file samples for further exploration
-        file_samples = analysis.get("file_samples", {})
-        if file_samples:
-            result["file_samples"] = file_samples
+        # Format technologies and languages in the expected output format
+        technologies = analysis.get("technologies", {})
+        if technologies:
+            # Ensure technologies output format matches expectations
+            formatted_tech = {}
+            for category, techs in technologies.items():
+                # Convert from set to list if needed
+                formatted_tech[category] = sorted(list(techs)) if isinstance(techs, set) else techs
+            result["technologies"] = formatted_tech
+        else:
+            result["technologies"] = {}
+            
+        # Format languages
+        languages = analysis.get("languages", {})
+        if languages:
+            result["languages"] = languages
+        else:
+            result["languages"] = {}
             
         return result
+        
     except Exception as e:
-        return {"success": False, "error": f"Error scanning repository: {str(e)}"}
+        logger.error(f"Error scanning repository: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error scanning repository: {str(e)}",
+            "file_count": 0
+        }
 
 def get_tech_stack(repo_path: str) -> Dict[str, Any]:
     """
-    Detect the technology stack used in a repository.
+    Get the technology stack used in the repository.
     
     Args:
         repo_path: Path to the repository
@@ -80,30 +101,27 @@ def get_tech_stack(repo_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary with detected technologies by category
     """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
     try:
-        # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
-        
-        # Detect frameworks and technologies
-        technologies = scanner.detect_frameworks()
-        
-        # Format the results for easy consumption
-        result = {
-            "success": True,
-            "message": "Technology stack detection completed",
-            "tech_stack": {}
-        }
+        scanner = RepoScanner(repo_path)
+        tech_stack = scanner.detect_frameworks()
         
         # Convert sets to lists for JSON serialization
-        for category, techs in technologies.items():
-            result["tech_stack"][category] = sorted(list(techs))
+        formatted_tech = {}
+        for category, techs in tech_stack.items():
+            formatted_tech[category] = sorted(list(techs))
         
-        return result
+        return {
+            "success": True,
+            "message": "Technology stack detection completed",
+            "tech_stack": formatted_tech
+        }
     except Exception as e:
-        return {"success": False, "error": f"Error detecting technology stack: {str(e)}"}
+        logger.error(f"Error detecting technologies: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error detecting technologies: {str(e)}",
+            "technologies": {}
+        }
 
 def get_code_files(repo_path: str, language: str = None) -> Dict[str, Any]:
     """
@@ -116,12 +134,9 @@ def get_code_files(repo_path: str, language: str = None) -> Dict[str, Any]:
     Returns:
         Dictionary with code files by language
     """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
     try:
         # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
+        scanner = RepoScanner(repo_path)
         
         # Get all files
         files = scanner.scan_files()
@@ -189,11 +204,11 @@ def get_code_files(repo_path: str, language: str = None) -> Dict[str, Any]:
             
             result["message"] = f"Found {len(filtered_files)} {normalized_language} files in the repository"
             result["language"] = normalized_language
-            result["files"] = filtered_files[:100]  # Limit to 100 files
+            result["files"] = filtered_files[:50]  # Limit to 50 files
             result["file_count"] = len(filtered_files)
             
-            if len(filtered_files) > 100:
-                result["note"] = f"Showing first 100 of {len(filtered_files)} {normalized_language} files"
+            if len(filtered_files) > 50:
+                result["note"] = f"Showing first 50 of {len(filtered_files)} {normalized_language} files"
         else:
             # Group files by language
             files_by_language = {}
@@ -238,296 +253,315 @@ def get_code_files(repo_path: str, language: str = None) -> Dict[str, Any]:
         
         return result
     except Exception as e:
-        return {"success": False, "error": f"Error getting code files: {str(e)}"}
-
-def get_directory_structure(repo_path: str, max_depth: int = 3) -> Dict[str, Any]:
-    """
-    Get a hierarchical directory tree structure of the repository.
-    
-    Args:
-        repo_path: Path to the repository
-        max_depth: Maximum depth of the directory tree (to limit response size)
-        
-    Returns:
-        Dictionary with directory tree structure
-    """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
-    try:
-        # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
-        
-        # Get directory tree
-        full_tree = scanner.create_directory_tree()
-        
-        # Function to limit tree depth
-        def limit_tree_depth(tree, current_depth=0):
-            if current_depth >= max_depth:
-                # Return a simplified representation
-                files_count = len(tree.get("files", []))
-                dirs_count = len(tree.get("dirs", {}))
-                
-                return {
-                    "files_count": files_count,
-                    "dirs_count": dirs_count,
-                    "note": f"Tree truncated at depth {max_depth}, {files_count} files and {dirs_count} subdirectories not shown"
-                }
-            
-            result = {}
-            
-            if "files" in tree:
-                result["files"] = tree["files"]
-            
-            if "dirs" in tree:
-                result["dirs"] = {}
-                for name, subtree in tree["dirs"].items():
-                    result["dirs"][name] = limit_tree_depth(subtree, current_depth + 1)
-            
-            return result
-        
-        # Limit tree depth
-        limited_tree = limit_tree_depth(full_tree)
-        
+        logger.error(f"Error getting code files: {str(e)}")
         return {
-            "success": True,
-            "message": "Directory structure retrieved successfully",
-            "directory_tree": limited_tree,
-            "max_depth": max_depth
+            "success": False,
+            "message": f"Error getting code files: {str(e)}",
+            "total_files": 0
         }
-    except Exception as e:
-        return {"success": False, "error": f"Error getting directory structure: {str(e)}"}
 
-def get_module_files(repo_path: str, module_name: str) -> Dict[str, Any]:
+def identify_api_components(repo_path: str) -> Dict[str, Any]:
     """
-    Get files that belong to a specific module in the repository.
+    Identify API components in a repository for focused documentation.
+    
+    This function detects:
+    1. API directories and modules
+    2. Router/endpoint definition files
+    3. API controller/handler files
+    4. Schema/model definition files
+    5. Main application entry points
+    
+    Focus is on API components that require documentation for developers
+    to efficiently integrate with and understand the API.
     
     Args:
         repo_path: Path to the repository
-        module_name: Name of the module to get files for
         
     Returns:
-        Dictionary with files belonging to the module
+        Dictionary with API components categorized by type
     """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
     try:
         # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
+        scanner = RepoScanner(repo_path)
         
         # Get all files
         files = scanner.scan_files()
         
-        # Identify modules
-        modules = scanner.identify_modules(files)
+        # Get language analysis to determine primary language
+        languages, extensions = scanner.analyze_languages(files)
+        primary_language = max(languages.items(), key=lambda x: x[1])[0] if languages else "Unknown"
         
-        # Check if the requested module exists
-        if module_name not in modules:
-            # Try case-insensitive matching
-            module_found = False
-            for mod_name in modules.keys():
-                if mod_name.lower() == module_name.lower():
-                    module_name = mod_name
-                    module_found = True
-                    break
-            
-            if not module_found:
-                # List available modules
-                available_modules = list(modules.keys())
-                return {
-                    "success": False,
-                    "error": f"Module '{module_name}' not found in repository",
-                    "available_modules": available_modules
-                }
-        
-        # Get files for the module
-        module_files = modules[module_name]
-        
-        # Group files by extension
-        files_by_extension = {}
-        for file in module_files:
-            ext = os.path.splitext(file)[1].lower()
-            if not ext:
-                ext = "(no extension)"
-                
-            if ext not in files_by_extension:
-                files_by_extension[ext] = []
-                
-            files_by_extension[ext].append(file)
-        
-        return {
-            "success": True,
-            "message": f"Found {len(module_files)} files in module '{module_name}'",
-            "module": module_name,
-            "files": module_files,
-            "file_count": len(module_files),
-            "files_by_extension": files_by_extension
-        }
-    except Exception as e:
-        return {"success": False, "error": f"Error getting module files: {str(e)}"}
-
-def find_important_files(repo_path: str) -> Dict[str, Any]:
-    """
-    Find important files in the repository that provide context about the project.
-    
-    Args:
-        repo_path: Path to the repository
-        
-    Returns:
-        Dictionary with important files categorized by type
-    """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
-    try:
-        # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
-        
-        # Get all files
-        files = scanner.scan_files()
-        
-        # Collect file samples
-        file_samples = scanner.collect_file_samples(files)
-        
-        # Important files by category
-        important_files = {
-            "documentation": [f for f in files if f.lower().endswith('.md') or f.lower().endswith('.rst')],
-            "configuration": [f for f in files if any(f.lower().endswith(ext) for ext in ['.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf'])],
-            "package_info": [f for f in files if os.path.basename(f).lower() in ['package.json', 'requirements.txt', 'setup.py', 'pyproject.toml', 'cargo.toml', 'gemfile', 'composer.json']],
-            "infrastructure": [f for f in files if any(f.lower().endswith(ext) for ext in ['.dockerfile', '.dockerignore']) or os.path.basename(f).lower() in ['dockerfile', 'docker-compose.yml', 'docker-compose.yaml']],
-            "ci_cd": [f for f in files if '.github/workflows' in f.lower() or '.gitlab-ci.yml' in f.lower() or '.travis.yml' in f.lower() or '.jenkins' in f.lower()],
-            "main_entrypoint": [f for f in files if os.path.basename(f).lower() in ['main.py', 'app.py', 'index.js', 'server.js', 'main.go', 'main.java', 'program.cs']]
+        # Common API file patterns across languages
+        api_components = {
+            "api_directories": [],
+            "entry_points": [],
+            "routers": [],
+            "handlers": [],
+            "schemas": [],
+            "config": []
         }
         
-        # Find README files
-        readme_files = [f for f in files if os.path.basename(f).lower().startswith('readme')]
-        important_files["readme"] = readme_files
-        
-        # Combine the automatic samples with our categorized files
-        for category, sample_files in file_samples.items():
-            if category not in important_files:
-                important_files[category] = sample_files
-        
-        return {
-            "success": True,
-            "message": "Important files identified in repository",
-            "important_files": important_files
-        }
-    except Exception as e:
-        return {"success": False, "error": f"Error finding important files: {str(e)}"}
-
-def analyze_file_relationships(repo_path: str) -> Dict[str, Any]:
-    """
-    Analyze relationships between files in the repository.
-    
-    Args:
-        repo_path: Path to the repository
-        
-    Returns:
-        Dictionary with related files and their relationships
-    """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
-    try:
-        # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
-        
-        # Get all files
-        files = scanner.scan_files()
-        
-        # Get related files
-        related_files = scanner.get_file_extension_breakdown(files)
-        
-        # Format response
-        file_relationships = {}
-        
-        # Process each group of related files
-        for base_name, rel_files in related_files.items():
-            if len(rel_files) > 1:  # Only include if there are multiple related files
-                file_relationships[base_name] = {
-                    "files": rel_files,
-                    "count": len(rel_files)
-                }
-        
-        return {
-            "success": True,
-            "message": f"Found {len(file_relationships)} groups of related files",
-            "file_relationships": file_relationships
-        }
-    except Exception as e:
-        return {"success": False, "error": f"Error analyzing file relationships: {str(e)}"}
-
-def get_repository_summary(repo_path: str) -> Dict[str, Any]:
-    """
-    Generate a high-level summary of the repository.
-    
-    Args:
-        repo_path: Path to the repository
-        
-    Returns:
-        Dictionary with repository summary information
-    """
-    if not os.path.exists(repo_path):
-        return {"success": False, "error": f"Repository path not found: {repo_path}"}
-    
-    try:
-        # Initialize scanner
-        scanner = RepoScanner(repo_path=repo_path)
-        
-        # Perform comprehensive analysis
-        analysis = scanner.analyze_repository()
-        
-        # Get key metrics and information
-        file_count = analysis.get("file_count", 0)
-        languages = analysis.get("languages", {})
-        tech_stack = analysis.get("technologies", {})
-        
-        # Get top languages
-        top_languages = dict(sorted(languages.items(), key=lambda x: x[1], reverse=True)[:5])
-        
-        # Get key technologies by category
-        key_tech = {}
-        for category, techs in tech_stack.items():
-            # Convert set to list for serialization
-            key_tech[category] = list(techs)
-        
-        # Get main directories
-        directories = set()
-        for file in analysis.get("file_paths", []):
-            parts = file.split('/')
-            if len(parts) > 1 and parts[0]:
-                directories.add(parts[0])
-        
-        # Find README files
-        readme_files = [
-            file for file in analysis.get("file_paths", [])
-            if os.path.basename(file).lower().startswith('readme')
+        # Detect API directories
+        api_dir_patterns = [
+            "/api/", "apis/", "/endpoints/", "/routes/", 
+            "/controllers/", "/views/", "/handlers/"
         ]
         
-        # Identify modules/components
-        modules = analysis.get("modules", {})
-        top_modules = sorted(modules.keys(), key=lambda m: len(modules[m]), reverse=True)[:10]
-        
-        # Create repository summary
-        summary = {
-            "repo_name": os.path.basename(os.path.abspath(repo_path)),
-            "file_count": file_count,
-            "top_languages": top_languages,
-            "tech_stack": key_tech,
-            "main_directories": list(directories),
-            "readme_files": readme_files,
-            "top_modules": [
-                {"name": module, "file_count": len(modules[module])}
-                for module in top_modules
-            ]
+        # Special case patterns by language
+        lang_specific_patterns = {
+            "Python": {
+                "entry_points": ["app.py", "main.py", "server.py", "api.py", "application.py"],
+                "router_patterns": ["router", "routes", "urls.py", "endpoints"],
+                "schema_patterns": ["schema", "model", "dto", "types"],
+                "file_extensions": [".py"]
+            },
+            "JavaScript": {
+                "entry_points": ["app.js", "server.js", "index.js", "api.js", "main.js"],
+                "router_patterns": ["router", "routes", "controller", "api.js"],
+                "schema_patterns": ["schema", "model", "type", "interface", "dto"],
+                "file_extensions": [".js", ".ts", ".jsx", ".tsx"]
+            },
+            "TypeScript": {
+                "entry_points": ["app.ts", "server.ts", "index.ts", "api.ts", "main.ts"],
+                "router_patterns": ["router", "routes", "controller", "api.ts"],
+                "schema_patterns": ["schema", "model", "type", "interface", "dto"],
+                "file_extensions": [".ts", ".tsx"]
+            },
+            "Java": {
+                "entry_points": ["Application.java", "Main.java", "ApiApplication.java"],
+                "router_patterns": ["Controller", "Resource", "Endpoint", "Route"],
+                "schema_patterns": ["DTO", "Model", "Entity", "Schema"],
+                "file_extensions": [".java"]
+            },
+            "Ruby": {
+                "entry_points": ["application.rb", "api.rb", "server.rb"],
+                "router_patterns": ["routes", "controller"],
+                "schema_patterns": ["model", "schema"],
+                "file_extensions": [".rb"]
+            },
+            "Go": {
+                "entry_points": ["main.go", "server.go", "api.go", "app.go"],
+                "router_patterns": ["handler", "controller", "route"],
+                "schema_patterns": ["model", "schema", "type", "struct"],
+                "file_extensions": [".go"]
+            },
+            "PHP": {
+                "entry_points": ["index.php", "api.php", "app.php"],
+                "router_patterns": ["controller", "route", "api"],
+                "schema_patterns": ["model", "entity", "schema"],
+                "file_extensions": [".php"]
+            }
         }
+        
+        # Framework-specific patterns (for improved precision)
+        framework_patterns = {
+            "fastapi": {
+                "entry_pattern": ["app = FastAPI()", "fastapi.FastAPI()", "from fastapi import"],
+                "router_pattern": ["APIRouter", "@app."],
+                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/api/"])
+            },
+            "flask": {
+                "entry_pattern": ["Flask(__name__", "from flask import"],
+                "router_pattern": ["@app.route", "flask.Blueprint"],
+                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/views/"])
+            },
+            "express": {
+                "entry_pattern": ["express()", "require('express')", "import express"],
+                "router_pattern": ["router", "app.use", "app.get", "app.post"],
+                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/controllers/"])
+            },
+            "django": {
+                "entry_pattern": ["Django", "urls.py"],
+                "router_pattern": ["urlpatterns", "path("],
+                "file_detection": lambda f: "urls.py" in f.lower() or "/views/" in f.lower()
+            },
+            "spring": {
+                "entry_pattern": ["@SpringBootApplication", "SpringApplication.run"],
+                "router_pattern": ["@RestController", "@Controller", "@RequestMapping"],
+                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["controller", "resource"])
+            },
+        }
+        
+        # 1. First scan - Find API directories
+        api_directories = set()
+        for file in files:
+            for pattern in api_dir_patterns:
+                if pattern in file.lower():
+                    # Get the directory containing the pattern
+                    parts = file.split('/')
+                    dir_index = 0
+                    for i, part in enumerate(parts):
+                        if pattern.strip('/') in part.lower():
+                            dir_index = i
+                            break
+                    
+                    if dir_index > 0:
+                        api_dir = '/'.join(parts[:dir_index+1])
+                        api_directories.add(api_dir)
+        
+        api_components["api_directories"] = sorted(list(api_directories))
+        
+        # 2. Now process each file by category
+        for file in files:
+            file_lower = file.lower()
+            filename = os.path.basename(file_lower)
+            file_ext = os.path.splitext(file_lower)[1]
+            
+            # Check if file is in an API directory
+            in_api_dir = any(file.startswith(api_dir) for api_dir in api_directories)
+            
+            # Analyze file content for key patterns if needed
+            file_content = None
+            
+            # 2.1 API Entry points (main app files)
+            is_entry_point = False
+            
+            # Check filename-based patterns for entry points
+            for lang, patterns in lang_specific_patterns.items():
+                if any(filename == entry_file.lower() for entry_file in patterns["entry_points"]):
+                    is_entry_point = True
+                    break
+            
+            # If not identified by filename, check API directories for main file patterns
+            if not is_entry_point and in_api_dir:
+                # For files in API directories, check for main app patterns
+                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
+                       for ext in lang_patterns["file_extensions"]):
+                    
+                    # Check for entry point patterns in content (lazy load content if needed)
+                    for framework, patterns in framework_patterns.items():
+                        if file_content is None:
+                            try:
+                                with open(os.path.join(repo_path, file), 'r', encoding='utf-8', errors='ignore') as f:
+                                    file_content = f.read()
+                            except Exception:
+                                file_content = ""  # Failed to read file
+                        
+                        if any(pattern in file_content for pattern in patterns["entry_pattern"]):
+                            is_entry_point = True
+                            break
+            
+            if is_entry_point:
+                api_components["entry_points"].append(file)
+            
+            # 2.2 Router files
+            is_router = False
+            
+            # Check filename-based patterns
+            if any(router_pattern in file_lower for lang_patterns in lang_specific_patterns.values() 
+                  for router_pattern in lang_patterns["router_patterns"]):
+                is_router = True
+            
+            # If not identified by filename, check content for router patterns
+            if not is_router and in_api_dir:
+                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
+                       for ext in lang_patterns["file_extensions"]):
+                    
+                    # Check for router patterns in content (lazy load content if needed)
+                    for framework, patterns in framework_patterns.items():
+                        if file_content is None:
+                            try:
+                                with open(os.path.join(repo_path, file), 'r', encoding='utf-8', errors='ignore') as f:
+                                    file_content = f.read()
+                            except Exception:
+                                file_content = ""  # Failed to read file
+                        
+                        if any(pattern in file_content for pattern in patterns["router_pattern"]):
+                            is_router = True
+                            break
+            
+            if is_router:
+                api_components["routers"].append(file)
+            
+            # 2.3 Handler/Controller files
+            # Files in api/controllers or similar directories
+            handler_patterns = ["/controllers/", "/handlers/", "service", "controller"]
+            if any(pattern in file_lower for pattern in handler_patterns) and not is_router and not is_entry_point:
+                if file_ext in [".py", ".js", ".ts", ".java", ".go", ".rb", ".php"]:
+                    api_components["handlers"].append(file)
+            
+            # 2.4 Schema/model files
+            schema_patterns = ["schema", "model", "entity", "dto", "type", "interface"]
+            if any(pattern in file_lower for pattern in schema_patterns):
+                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
+                       for ext in lang_patterns["file_extensions"]):
+                    api_components["schemas"].append(file)
+            
+            # 2.5 Config files specifically for APIs
+            if in_api_dir and any(pattern in file_lower for pattern in ["config", "settings"]):
+                api_components["config"].append(file)
+        
+        # Filter out empty categories
+        api_components = {k: v for k, v in api_components.items() if v}
+        
+        # Calculate stats
+        total_api_files = sum(len(files) for files in api_components.values())
+        
+        # Create result
+        result = {
+            "success": True,
+            "message": f"Identified {total_api_files} API-related files across {len(api_components)} categories",
+            "api_components": api_components,
+            "metrics": {
+                "total_api_files": total_api_files,
+                "api_directories": len(api_components.get("api_directories", [])),
+                "primary_language": primary_language
+            }
+        }
+        
+        return result
+    except Exception as e:
+        logger.error(f"Error identifying API components: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error identifying API components: {str(e)}",
+            "api_components": {}
+        }
+
+def generate_repo_tree(repo_path: str) -> Dict[str, Any]:
+    """
+    Generate a visually enhanced text-based directory tree for the repository.
+    
+    Features:
+    - Shows the repository structure with intuitive tree connectors (├─→, └─→)
+    - Includes file and directory icons for better visual distinction
+    - Starts with the repository name at the top
+    - Maintains proper vertical connection lines
+    
+    Args:
+        repo_path: Path to the repository
+        
+    Returns:
+        Dictionary containing the text tree representation
+    """
+    try:
+        # Normalize repository path
+        repo_path = os.path.abspath(repo_path)
+        if not os.path.exists(repo_path):
+            return {
+                "success": False,
+                "message": f"Repository path does not exist: {repo_path}",
+                "text_tree": ""
+            }
+            
+        scanner = RepoScanner(
+            repo_path=repo_path,
+            use_gitignore=True
+        )
+        
+        # Generate text tree
+        text_tree = scanner.create_tree()
         
         return {
             "success": True,
-            "message": "Repository summary generated successfully",
-            "summary": summary
+            "message": "Repository tree generated successfully",
+            "text_tree": text_tree
         }
+        
     except Exception as e:
-        return {"success": False, "error": f"Error generating repository summary: {str(e)}"} 
+        logger.error(f"Error generating repository tree: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Error generating repository tree: {str(e)}",
+            "text_tree": ""
+        }
