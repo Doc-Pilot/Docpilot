@@ -103,14 +103,9 @@ class RepoScanner:
                 rel_path = os.path.relpath(file_path, self.repo_path)
                 rel_path = rel_path.replace('\\', '/')  # Normalize path separators
                 
-                # Check if file should be excluded
-                exclude = False
-                for pattern in self.exclude_patterns:
-                    if fnmatch.fnmatch(rel_path, pattern) or fnmatch.fnmatch(file, pattern):
-                        exclude = True
-                        break
-                
-                if not exclude:
+                # Use the _should_include_file method which properly handles both
+                # gitignore patterns and explicit exclude/include patterns
+                if self._should_include_file(rel_path):
                     all_files.append(rel_path)
         
         return all_files
