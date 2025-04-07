@@ -6,15 +6,16 @@ Core utilities for scanning repositories and analyzing their structure.
 Provides hierarchical representations optimized for documentation generation.
 """
 
+# Importing Dependencies
 import os
 import re
-import fnmatch
-from typing import List, Dict, Any, Optional, Set, Tuple
-import logging
-import pathspec
-from collections import defaultdict, Counter
 import json
+import fnmatch
+import logging
+from collections import defaultdict, Counter
+from typing import List, Dict, Any, Set, Tuple
 
+# Setting up logging
 logger = logging.getLogger(__name__)
 
 class RepoScanner:

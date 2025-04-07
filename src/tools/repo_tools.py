@@ -7,11 +7,8 @@ These wrapper functions use the core RepoScanner utility with standardized input
 """
 
 import os
-import json
-from typing import Dict, List, Any, Optional, Union, Set, Tuple
-from pathlib import Path
+from typing import Dict, List, Any
 import logging
-from collections import defaultdict
 
 from ..utils import RepoScanner
 
