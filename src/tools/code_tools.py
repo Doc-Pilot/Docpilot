@@ -19,7 +19,8 @@ from ..utils.code_parser import (
     is_supported_language,
     CodeModule,
     CodeFunction,
-    CodeClass
+    CodeClass,
+    extract_structure
 )
 
 def get_code_structure(file_path: str) -> Dict[str, Any]:
@@ -38,49 +39,20 @@ def get_code_structure(file_path: str) -> Dict[str, Any]:
     if not is_supported_language(file_path):
         return {"success": False, "error": f"Unsupported file type: {file_path}"}
     
-    module = parse_file(file_path)
-    if not module:
+    # Use extract_structure which has more robust function detection
+    parsed_structure = extract_structure(file_path)
+    if not parsed_structure:
         return {"success": False, "error": f"Failed to parse file: {file_path}"}
     
+    # Create result with correct format
     result = {
         "success": True,
         "file_path": file_path,
-        "language": module.language,
-        "module_docstring": module.docstring,
-        "functions": [],
-        "classes": []
+        "language": parsed_structure["language"],
+        "module_docstring": parsed_structure["docstring"],
+        "functions": parsed_structure["functions"],
+        "classes": parsed_structure["classes"]
     }
-    
-    # Add functions
-    for func in module.functions:
-        result["functions"].append({
-            "name": func.name,
-            "params": func.params,
-            "docstring": func.docstring,
-            "start_line": func.start_line,
-            "end_line": func.end_line
-        })
-    
-    # Add classes with their methods
-    for cls in module.classes:
-        class_info = {
-            "name": cls.name,
-            "docstring": cls.docstring,
-            "start_line": cls.start_line,
-            "end_line": cls.end_line,
-            "methods": []
-        }
-        
-        for method in cls.methods:
-            class_info["methods"].append({
-                "name": method.name,
-                "params": method.params,
-                "docstring": method.docstring,
-                "start_line": method.start_line,
-                "end_line": method.end_line
-            })
-            
-        result["classes"].append(class_info)
     
     return result
 
