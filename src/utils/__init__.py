@@ -67,11 +67,6 @@ __all__ = [
     "Usage",
     "extract_usage_from_result",
     
-    # Code parsing - core structures
-    "CodeModule",
-    "CodeClass",
-    "CodeFunction",
-    
     # Code parsing - main functions
     "parse_file",
     "parse_code",

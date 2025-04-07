@@ -6,9 +6,10 @@ This module provides utilities for tracking and calculating token usage and cost
 for Large Language Model interactions.
 """
 
+# Importing Dependencies
 from typing import Any
 from pydantic import BaseModel, Field
-from .logging import logger
+
 
 class ModelCosts(BaseModel):
     """Defines cost structure for different LLM models"""
