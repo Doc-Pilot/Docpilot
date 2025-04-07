@@ -356,12 +356,12 @@ def identify_api_components(repo_path: str) -> Dict[str, Any]:
         # Framework-specific patterns (for improved precision)
         framework_patterns = {
             "fastapi": {
-                "entry_pattern": ["app = FastAPI()", "fastapi.FastAPI()", "from fastapi import"],
-                "router_pattern": ["APIRouter", "@app."],
+                "entry_pattern": ["app = FastAPI()", "fastapi.FastAPI()", "from fastapi import", "import fastapi"],
+                "router_pattern": ["APIRouter", "@app.", "@router."],
                 "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/api/"])
             },
             "flask": {
-                "entry_pattern": ["Flask(__name__", "from flask import"],
+                "entry_pattern": ["Flask(__name__", "from flask import", "import flask"],
                 "router_pattern": ["@app.route", "flask.Blueprint"],
                 "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/views/"])
             },
