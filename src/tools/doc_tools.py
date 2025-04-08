@@ -20,7 +20,8 @@ from ..utils.doc_scanner import (
     get_changed_files,
     find_related_docs,
     should_update_documentation,
-    check_for_significant_changes
+    check_for_significant_changes,
+    get_last_modified
 )
 
 # Set up module logger
@@ -262,3 +263,56 @@ def get_doc_update_suggestions(repo_path: str, doc_path: str, related_files: Lis
     except Exception as e:
         logger.error(f"Error generating update suggestions: {str(e)}")
         return standard_error_response(f"Error generating update suggestions: {str(e)}", "suggestion_error")
+
+def get_doc_content(repo_path: str, doc_path: str) -> Dict[str, Any]:
+    """
+    Get the content of a documentation file.
+    
+    Args:
+        repo_path: Path to the git repository
+        doc_path: Path to the documentation file, relative to repo_path
+        
+    Returns:
+        Dictionary with doc content and metadata
+    """
+    # Validate repository path
+    if not os.path.exists(repo_path):
+        return standard_error_response(f"Repository path not found: {repo_path}", "file_not_found")
+    
+    # Validate doc path
+    doc_abs_path = os.path.join(repo_path, doc_path)
+    if not os.path.exists(doc_abs_path):
+        return standard_error_response(f"Documentation file not found: {doc_path}", "file_not_found")
+    
+    try:
+        # Read the file content
+        with open(doc_abs_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Get document metadata
+        doc_type = get_doc_type(doc_path)
+        title = extract_title(doc_abs_path)
+        last_modified = get_last_modified(repo_path, doc_path)
+        
+        # Get file stats
+        file_stats = os.stat(doc_abs_path)
+        file_size = file_stats.st_size
+        
+        return {
+            "success": True,
+            "message": "Successfully retrieved document content",
+            "doc_path": doc_path,
+            "content": content,
+            "title": title,
+            "type": doc_type,
+            "last_modified": last_modified,
+            "file_size": file_size,
+            "character_count": len(content),
+            "line_count": content.count('\n') + 1
+        }
+    except UnicodeDecodeError:
+        logger.warning(f"Unable to read {doc_path} as text, may be binary file")
+        return standard_error_response(f"Unable to read {doc_path} as text", "encoding_error")
+    except Exception as e:
+        logger.error(f"Error getting document content: {str(e)}")
+        return standard_error_response(f"Error getting document content: {str(e)}", "unexpected_error")

@@ -24,7 +24,8 @@ from .code_tools import (
 from .doc_tools import (
     scan_docs,
     find_docs_to_update,
-    get_doc_update_suggestions
+    get_doc_update_suggestions,
+    get_doc_content
 )
 
 from .repo_tools import (
@@ -47,6 +48,7 @@ __all__ = [
     "scan_docs",
     "find_docs_to_update",
     "get_doc_update_suggestions",
+    "get_doc_content",
     
     # Repository tools
     "scan_repository",

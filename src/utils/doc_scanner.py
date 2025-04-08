@@ -11,6 +11,7 @@ import re
 import logging
 import fnmatch
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 from functools import lru_cache
@@ -58,9 +59,21 @@ def run_git_command(repo_path: str, cmd: List[str], timeout: int = 10, fallback:
         Command output or fallback value on error
     """
     try:
+        # Check if git is installed
+        if not shutil.which("git"):
+            logger.error("Git executable not found in PATH")
+            return fallback
+            
+        # Check if repo path is a valid git repo if command needs a repo
+        if repo_path and cmd[0] != 'git' and not os.path.exists(os.path.join(repo_path, ".git")):
+            logger.error(f"Not a git repository: {repo_path}")
+            return fallback
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
-            logger.warning(f"{error_msg}: {result.stderr}")
+            # Don't log common errors like 'file not tracked'
+            if "not in the git repository" not in result.stderr and "no matches found" not in result.stderr:
+                logger.warning(f"{error_msg}: {result.stderr}")
             return fallback
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
@@ -181,11 +194,11 @@ def get_doc_type(file_path: str) -> str:
                 return doc_type
     
     # Special cases based on directory or filename
-    if '/docs/api/' in file_path:
+    if '/docs/api/' in file_path or '\\docs\\api\\' in file_path:
         return 'api'
-    elif '/docs/tutorials/' in file_path or '/docs/guides/' in file_path:
+    elif '/docs/tutorials/' in file_path or '/docs/guides/' in file_path or '\\docs\\tutorials\\' in file_path or '\\docs\\guides\\' in file_path:
         return 'tutorial'
-    elif '/examples/' in file_path:
+    elif '/examples/' in file_path or '\\examples\\' in file_path:
         return 'example'
     elif file_name.startswith('readme'):
         return 'readme'
