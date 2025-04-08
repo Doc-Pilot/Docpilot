@@ -65,11 +65,20 @@ def run_git_command(repo_path: str, cmd: List[str], timeout: int = 10, fallback:
             return fallback
             
         # Check if repo path is a valid git repo if command needs a repo
-        if repo_path and cmd[0] != 'git' and not os.path.exists(os.path.join(repo_path, ".git")):
+        if repo_path and '-C' in cmd and not os.path.exists(os.path.join(repo_path, ".git")):
             logger.error(f"Not a git repository: {repo_path}")
             return fallback
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # Fix for Windows encoding issues - force UTF-8
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            encoding='utf-8',  # Force UTF-8 encoding
+            errors='replace',  # Replace invalid chars instead of failing
+            timeout=timeout
+        )
+        
         if result.returncode != 0:
             # Don't log common errors like 'file not tracked'
             if "not in the git repository" not in result.stderr and "no matches found" not in result.stderr:
@@ -79,6 +88,18 @@ def run_git_command(repo_path: str, cmd: List[str], timeout: int = 10, fallback:
     except subprocess.TimeoutExpired:
         logger.error(f"Git command timed out after {timeout}s: {' '.join(cmd)}")
         return fallback
+    except UnicodeDecodeError as e:
+        logger.error(f"Encoding error in git command: {str(e)}")
+        # Try again without text mode
+        try:
+            # Fall back to binary mode and decode manually
+            result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+            if result.returncode != 0:
+                return fallback
+            # Decode bytes with error handling
+            return result.stdout.decode('utf-8', errors='replace').strip()
+        except Exception:
+            return fallback
     except Exception as e:
         logger.error(f"Git error: {str(e)}")
         return fallback
