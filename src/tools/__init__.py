@@ -23,7 +23,6 @@ from .code_tools import (
 
 from .doc_tools import (
     scan_docs,
-    get_doc_content,
     find_docs_to_update,
     get_doc_update_suggestions
 )
@@ -46,14 +45,8 @@ __all__ = [
     
     # Documentation tools
     "scan_docs",
-    "get_doc_by_type",
-    "get_doc_content",
     "find_docs_to_update",
     "get_doc_update_suggestions",
-    "get_doc_categories",
-    "extract_doc_section",
-    "validate_doc_links",
-    "extract_doc_structure",
     
     # Repository tools
     "scan_repository",

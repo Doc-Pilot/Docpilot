@@ -9,6 +9,7 @@ them with code changes to identify documentation that needs updating.
 import os
 import re
 import logging
+import fnmatch
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
@@ -159,6 +160,40 @@ def scan_documentation(repo_path: str, skip_ignored: bool = True) -> Dict[str, D
                     }
     
     return doc_files
+
+def get_doc_type(file_path: str) -> str:
+    """
+    Determine the type of documentation file based on its path.
+    
+    Args:
+        file_path: Path to the documentation file
+        
+    Returns:
+        The documentation type (e.g., 'readme', 'api', 'tutorial')
+    """
+    file_path = file_path.lower()
+    file_name = os.path.basename(file_path)
+    
+    # Check against known documentation categories
+    for doc_type, patterns in DOC_CATEGORIES.items():
+        for pattern in patterns:
+            if fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_name, pattern):
+                return doc_type
+    
+    # Special cases based on directory or filename
+    if '/docs/api/' in file_path:
+        return 'api'
+    elif '/docs/tutorials/' in file_path or '/docs/guides/' in file_path:
+        return 'tutorial'
+    elif '/examples/' in file_path:
+        return 'example'
+    elif file_name.startswith('readme'):
+        return 'readme'
+    elif 'changelog' in file_name:
+        return 'changelog'
+    
+    # Default to generic documentation type
+    return 'documentation'
 
 def get_changed_files(repo_path: str, base_ref: str, target_ref: str) -> List[str]:
     """
