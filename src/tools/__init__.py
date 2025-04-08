@@ -16,8 +16,6 @@ Categories:
 from .code_tools import (
     get_code_structure,
     parse_code_snippet,
-    find_undocumented_elements,
-    calculate_documentation_coverage,
     get_function_details,
     get_class_details,
     get_supported_languages
@@ -25,21 +23,15 @@ from .code_tools import (
 
 from .doc_tools import (
     scan_docs,
-    get_doc_by_type,
     get_doc_content,
     find_docs_to_update,
-    get_doc_update_suggestions,
-    get_doc_categories,
-    extract_doc_section,
-    validate_doc_links,
-    extract_doc_structure
+    get_doc_update_suggestions
 )
 
 from .repo_tools import (
     scan_repository,
     generate_repo_tree,
     get_tech_stack,
-    get_code_files,
     identify_api_components
 )
 
@@ -48,8 +40,6 @@ __all__ = [
     # Code analysis tools
     "get_code_structure",
     "parse_code_snippet",
-    "find_undocumented_elements",
-    "calculate_documentation_coverage",
     "get_function_details",
     "get_class_details",
     "get_supported_languages",
@@ -69,6 +59,5 @@ __all__ = [
     "scan_repository",
     "generate_repo_tree",
     "get_tech_stack",
-    "get_code_files",
     "identify_api_components"
 ] 
