@@ -40,18 +40,20 @@ from .code_parser import (
     # Helper functions
     detect_language,
     get_supported_languages,
+    is_supported_language,
 )
 
 # Document scanning
-# No need to import classes that don't exist
-# Commenting out this section until we can confirm what's available in doc_scanner.py
-# from .doc_scanner import (
-#     DocScanner,
-#     DocstringStats,
-#     DocQuality,
-#     scan_file_docstrings,
-#     analyze_docstring_quality
-# )
+from .doc_scanner import (
+    scan_documentation,
+    get_changed_files,
+    find_related_docs,
+    should_update_documentation,
+    check_for_significant_changes,
+    get_doc_type,
+    extract_title,
+    get_last_modified
+)
 
 # Organize exports by category for better readability and discoverability
 __all__ = [
@@ -59,30 +61,29 @@ __all__ = [
     "logger",
     "get_settings",
     
-    # Repository utilities
-    "RepoScanner",
-    
     # Cost and token utilities
     "ModelCosts",
     "Usage",
     "extract_usage_from_result",
+
+    # Repository Scanning
+    "RepoScanner",
     
-    # Code parsing - core structures
-    "CodeModule",
-    "CodeClass",
-    "CodeFunction",
-    
-    # Code parsing - main functions
+    # Code parsing
     "parse_file",
     "parse_code",
     "extract_structure",
     "detect_language",
     "get_supported_languages",
+    "is_supported_language",
     
-    # Documentation scanning - commented out until we can verify what's available
-    # "DocScanner",
-    # "DocstringStats",
-    # "DocQuality",
-    # "scan_file_docstrings",
-    # "analyze_docstring_quality"
+    # Documentation Scanning
+    'scan_documentation',
+    'get_changed_files',
+    'find_related_docs',
+    'should_update_documentation',
+    'check_for_significant_changes',
+    'get_doc_type',
+    'extract_title',
+    'get_last_modified'
 ]

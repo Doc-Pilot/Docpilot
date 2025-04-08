@@ -1,4 +1,11 @@
-# Importing Dependencies
+"""
+Logging Configuration
+====================
+
+This module provides a centralized logging configuration for the Docpilot project.
+It uses Logfire for structured logging and monitoring.
+"""
+
 import logfire
 from dotenv import load_dotenv
 
