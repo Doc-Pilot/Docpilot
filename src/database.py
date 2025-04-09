@@ -6,31 +6,19 @@ Handles database connection, session management, and initialization.
 """
 
 import os
-from sqlalchemy import create_engine, JSON, Text, event, MetaData, Table, inspect
+import logging
+from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
-from src.utils import logger
 from sqlalchemy.exc import SQLAlchemyError
-import logging
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+from src.utils.config import get_settings
 
-# Determine database URL based on environment
-def get_database_url():
-    """Get database URL based on current environment."""
-    app_env = os.getenv("APP_ENV", "development")
-    if app_env == "production":
-        return os.getenv("PROD_DATABASE_URL")
-    elif app_env == "testing":
-        return os.getenv("TEST_DATABASE_URL")
-    else:
-        return os.getenv("DEV_DATABASE_URL")
+settings = get_settings()
 
 # Get database URL
-DATABASE_URL = get_database_url()
+DATABASE_URL = settings.database_url
 
 # Create engine based on URL with improved connection pooling
 engine = create_engine(

@@ -29,8 +29,12 @@ class Settings(BaseModel):
     github_webhook_secret: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
     github_token: str = os.getenv("GITHUB_TOKEN", "")
     
-    # Database settings
-    database_url: str = os.getenv("DATABASE_URL", "")
+    if app_env == "production":
+        database_url: str = os.getenv("PROD_DATABASE_URL")
+    elif app_env == "testing":
+        database_url: str = os.getenv("TEST_DATABASE_URL")
+    else:
+        database_url: str = os.getenv("DEV_DATABASE_URL")
     
     # AI API settings
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
