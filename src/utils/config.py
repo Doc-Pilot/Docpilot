@@ -5,49 +5,56 @@ Configuration Utility
 This utility provides configuration settings for DocPilot.
 """
 
-import os
 from functools import lru_cache
-from pydantic import BaseModel
-from dotenv import load_dotenv
+from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load environment variables
-load_dotenv()
-
-class Settings(BaseModel):
+class Settings(BaseSettings):
     """Application settings from environment variables"""
     # Application settings
-    app_env: str = os.getenv("APP_ENV", "development")
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    app_env: str = "development"
+    log_level: str = "INFO"
+    debug: bool = False
     
     # Logfire settings
-    logfire_token: str = os.getenv("LOGFIRE_TOKEN", "")
+    logfire_token: str = ""
     
     # GitHub settings
-    github_app_id: str = os.getenv("GITHUB_APP_ID", "")
-    github_private_key_path: str = os.getenv("GITHUB_PRIVATE_KEY_PATH", "")
-    github_webhook_secret: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
-    github_token: str = os.getenv("GITHUB_TOKEN", "")
+    github_app_id: str = ""
+    github_private_key_path: str = ""
+    github_webhook_secret: str = ""
+    github_token: str = ""
     
-    if app_env == "production":
-        database_url: str = os.getenv("PROD_DATABASE_URL")
-    elif app_env == "testing":
-        database_url: str = os.getenv("TEST_DATABASE_URL")
-    else:
-        database_url: str = os.getenv("DEV_DATABASE_URL")
+    # Database settings
+    prod_database_url: Optional[str] = None
+    dev_database_url: Optional[str] = None
+    test_database_url: Optional[str] = None
     
     # AI API settings
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
     
     # Model settings
-    default_model: str = os.getenv("DEFAULT_MODEL", "openai:gpt-4o-mini")
-    model_temperature: float = float(os.getenv("MODEL_TEMPERATURE", "0.0"))
-    max_tokens: int = int(os.getenv("MAX_TOKENS", "4096"))
-    retry_attempts: int = int(os.getenv("RETRY_ATTEMPTS", "2"))
+    default_model: str = "openai:gpt-4o-mini"
+    model_temperature: float = 0.0
+    max_tokens: int = 4096
+    retry_attempts: int = 2
     
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+    
+    @property
+    def database_url(self) -> str:
+        """Get the database URL based on environment"""
+        if self.app_env == "production":
+            return self.prod_database_url or ""
+        elif self.app_env == "testing":
+            return self.test_database_url or ""
+        else:
+            return self.dev_database_url or ""
 
 @lru_cache()
 def get_settings():
