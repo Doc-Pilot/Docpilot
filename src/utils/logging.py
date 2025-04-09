@@ -7,28 +7,62 @@ It uses Logfire for structured logging and monitoring.
 """
 
 import logfire
-from dotenv import load_dotenv
+from fastapi import FastAPI
 
 from .config import get_settings
 
-# Load environment variables
-load_dotenv()
+settings = get_settings()
 
-def setup_logging():
-    """Configure Logfire logging with proper settings"""
-    settings = get_settings()
-    
-    # Configure Logfire with correct parameters
+def core_logger():
+    """
+    Logfire instrumentation for core logging
+    """
     logfire.configure(
         token=settings.logfire_token,
-        service_name="docpilot",
+        service_name="Core",
         environment=settings.app_env
     )
 
-    # Instrument Pydantic for validation monitoring
-    logfire.instrument_pydantic_ai()
-    
     return logfire
 
-# Create a global logger instance
-logger = setup_logging()
+def pydantic_logger():
+    """
+    Logfire instrumentation for Pydantic AI
+    """
+    logfire.configure(
+        token=settings.logfire_token,
+        service_name="Agents",
+        environment=settings.app_env
+    )
+
+    logfire.instrument_pydantic_ai()
+
+    return logfire
+
+def fastapi_logger(app: FastAPI):
+    """
+    Logfire instrumentation for FastAPI
+    """
+    logfire.configure(
+        token=settings.logfire_token,
+        service_name="FastAPI",
+        environment=settings.app_env
+    )
+
+    logfire.instrument_fastapi(app)
+
+    return logfire
+
+def sqlalchemy_logger(engine):
+    """
+    Logfire instrumentation for SQLAlchemy
+    """
+    logfire.configure(
+        token=settings.logfire_token,
+        service_name="SQLAlchemy",
+        environment=settings.app_env
+    )
+
+    logfire.instrument_sqlalchemy(engine)
+
+    return logfire
