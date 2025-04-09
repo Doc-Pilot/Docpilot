@@ -9,9 +9,10 @@ from github import Github, GithubIntegration
 from github.GithubException import GithubException
 
 from ..utils.config import get_settings
+from ..utils.logging import core_logger
 from .installation_store import InstallationStore
 
-logger = logging.getLogger(__name__)
+logger = core_logger()
 
 class GitHubClient:
     """
@@ -49,7 +50,7 @@ class GitHubClient:
                 logger.info("Initialized GitHub client with personal access token")
                 
         except Exception as e:
-            logger.exception(f"Error initializing GitHub client: {str(e)}")
+            logger.exception(f"Error initializing GitHub client: {str(e)}", exc_info=True)
             raise
     
     async def get_github_client_for_repo(self, repo_name: str) -> Github:
@@ -70,6 +71,7 @@ class GitHubClient:
             return self.github
             
         if not self.github_app:
+            logger.error("No GitHub authentication available")
             raise ValueError("No GitHub authentication available")
             
         try:
@@ -95,7 +97,7 @@ class GitHubClient:
             try:
                 installation_id = self.github_app.get_installation(owner, repo).id
             except Exception as e:
-                logger.exception(f"Error getting installation for {repo_name}: {str(e)}")
+                logger.exception(f"Error getting installation for {repo_name}: {str(e)}", exc_info=True)
                 raise ValueError(f"No GitHub App installation found for {repo_name}")
             
             # Create an access token for this installation
@@ -116,7 +118,7 @@ class GitHubClient:
             # Create a Github instance with this token
             return Github(access_token)
         except Exception as e:
-            logger.exception(f"Error getting GitHub client for {repo_name}: {str(e)}")
+            logger.exception(f"Error getting GitHub client for {repo_name}: {str(e)}", exc_info=True)
             raise
     
     async def refresh_installation_repositories(self, installation_id: str) -> List[str]:
@@ -130,6 +132,7 @@ class GitHubClient:
             List of repository full names
         """
         if not self.github_app:
+            logger.error("GitHub App authentication not configured")
             raise ValueError("GitHub App authentication not configured")
             
         try:
@@ -162,7 +165,7 @@ class GitHubClient:
             
             return repositories
         except Exception as e:
-            logger.exception(f"Error refreshing repositories for installation {installation_id}: {str(e)}")
+            logger.exception(f"Error refreshing repositories for installation {installation_id}: {str(e)}", exc_info=True)
             raise
     
     async def get_file_content(
@@ -202,11 +205,11 @@ class GitHubClient:
             if e.status == 404:
                 logger.info(f"File {file_path} not found in {repo_name}")
             else:
-                logger.exception(f"GitHub error getting {file_path} from {repo_name}: {str(e)}")
+                logger.exception(f"GitHub error getting {file_path} from {repo_name}: {str(e)}", exc_info=True)
             return None
             
         except Exception as e:
-            logger.exception(f"Error getting file content: {str(e)}")
+            logger.exception(f"Error getting file content: {str(e)}", exc_info=True)
             return None
     
     async def update_documentation(
@@ -249,8 +252,8 @@ class GitHubClient:
                 )
                 
         except Exception as e:
-            logger.exception(f"Error updating documentation: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"Error preparing documentation update: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Error preparing documentation update: {str(e)}"}
     
     async def _update_inline_documentation(
         self,
@@ -348,9 +351,12 @@ Please review these documentation updates and adjust as needed.
                 "pr_url": pr.html_url
             }
             
+        except GithubException as e:
+            logger.exception(f"GitHub error updating inline docs: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"GitHub error: {str(e)}"}
         except Exception as e:
-            logger.exception(f"Error updating inline documentation: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"Error updating inline documentation: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
     
     async def _update_standalone_documentation(
         self,
@@ -459,9 +465,12 @@ Please review these documentation updates and adjust as needed.
                 "pr_url": pr.html_url
             }
             
+        except GithubException as e:
+            logger.exception(f"GitHub error updating standalone docs: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"GitHub error: {str(e)}"}
         except Exception as e:
-            logger.exception(f"Error updating standalone documentation: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"Error updating standalone documentation: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Unexpected error: {str(e)}"}
     
     def _create_directory_structure(
         self,
@@ -500,6 +509,7 @@ Please review these documentation updates and adjust as needed.
                     )
                 else:
                     raise
+        logger.info(f"Ensuring directory structure exists for {directory}")
     
     async def get_pr_changes(self, repo_name: str, pr_number: int) -> List[str]:
         """
@@ -521,7 +531,7 @@ Please review these documentation updates and adjust as needed.
             return [file.filename for file in files]
             
         except Exception as e:
-            logger.exception(f"Error getting PR changes: {str(e)}")
+            logger.exception(f"Error getting PR changes: {str(e)}", exc_info=True)
             return []
     
     async def get_file_diff(
@@ -554,7 +564,7 @@ Please review these documentation updates and adjust as needed.
             return None
             
         except Exception as e:
-            logger.exception(f"Error getting file diff: {str(e)}")
+            logger.exception(f"Error getting file diff: {str(e)}", exc_info=True)
             return None
     
     async def add_pr_comment(
@@ -595,8 +605,8 @@ Please review these documentation updates and adjust as needed.
             }
             
         except Exception as e:
-            logger.exception(f"Error adding PR comment: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"Error adding PR comment: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Error adding PR comment: {str(e)}"}
     
     async def add_issue_comment(
         self,
@@ -629,8 +639,8 @@ Please review these documentation updates and adjust as needed.
             }
             
         except Exception as e:
-            logger.exception(f"Error adding issue comment: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            logger.exception(f"Error adding issue comment: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Error adding issue comment: {str(e)}"}
     
     async def suggest_documentation_update(
         self,
@@ -685,5 +695,5 @@ Reply with "👍" or "Yes, create PR" to proceed.
             }
             
         except Exception as e:
-            logger.exception(f"Error suggesting documentation update: {str(e)}")
-            return {"status": "error", "message": str(e)} 
+            logger.exception(f"Error suggesting documentation update: {str(e)}", exc_info=True)
+            return {"success": False, "error": f"Error suggesting documentation update: {str(e)}"} 

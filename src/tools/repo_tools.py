@@ -8,11 +8,11 @@ These wrapper functions use the core RepoScanner utility with standardized input
 
 import os
 from typing import Dict, List, Any
-import logging
 
 from ..utils import RepoScanner
+from ..utils.logging import core_logger  # Import core_logger
 
-logger = logging.getLogger(__name__)
+logger = core_logger()
 
 def scan_repository(repo_path: str, 
                    include_patterns: List[str] = None,
@@ -81,7 +81,7 @@ def scan_repository(repo_path: str,
         return result
         
     except Exception as e:
-        logger.error(f"Error scanning repository: {str(e)}")
+        logger.error(f"Error scanning repository: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Error scanning repository: {str(e)}",
@@ -113,7 +113,7 @@ def get_tech_stack(repo_path: str) -> Dict[str, Any]:
             "tech_stack": formatted_tech
         }
     except Exception as e:
-        logger.error(f"Error detecting technologies: {str(e)}")
+        logger.error(f"Error detecting technologies: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Error detecting technologies: {str(e)}",
@@ -371,7 +371,7 @@ def identify_api_components(repo_path: str) -> Dict[str, Any]:
         
         return result
     except Exception as e:
-        logger.error(f"Error identifying API components: {str(e)}")
+        logger.error(f"Error identifying API components: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Error identifying API components: {str(e)}",
@@ -419,7 +419,7 @@ def generate_repo_tree(repo_path: str) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"Error generating repository tree: {str(e)}")
+        logger.error(f"Error generating repository tree: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Error generating repository tree: {str(e)}",

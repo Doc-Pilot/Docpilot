@@ -16,6 +16,10 @@ from ..utils.code_parser import (
     is_supported_language,
     extract_structure
 )
+from ..utils.logging import core_logger
+
+# Set up logger
+logger = core_logger()
 
 def get_code_structure(file_path: str) -> Dict[str, Any]:
     """
@@ -27,16 +31,24 @@ def get_code_structure(file_path: str) -> Dict[str, Any]:
     Returns:
         Dictionary with the code structure including functions, classes, and docstrings
     """
+    logger.info(f"Getting code structure for {file_path}")
     if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
         return {"success": False, "error": f"File not found: {file_path}"}
     
     if not is_supported_language(file_path):
+        logger.warning(f"Unsupported file type for structure extraction: {file_path}")
         return {"success": False, "error": f"Unsupported file type: {file_path}"}
     
     # Use extract_structure which has more robust function detection
-    parsed_structure = extract_structure(file_path)
-    if not parsed_structure:
-        return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    try:
+        parsed_structure = extract_structure(file_path)
+        if not parsed_structure:
+            logger.error(f"Failed to parse file: {file_path}")
+            return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    except Exception as e:
+        logger.exception(f"Error extracting structure from {file_path}: {str(e)}", exc_info=True)
+        return {"success": False, "error": f"Error parsing file: {str(e)}"}
     
     # Create result with correct format
     result = {
@@ -48,6 +60,7 @@ def get_code_structure(file_path: str) -> Dict[str, Any]:
         "classes": parsed_structure["classes"]
     }
     
+    logger.info(f"Successfully extracted structure for {file_path}")
     return result
 
 def parse_code_snippet(code: str, language: str) -> Dict[str, Any]:
@@ -61,12 +74,19 @@ def parse_code_snippet(code: str, language: str) -> Dict[str, Any]:
     Returns:
         Dictionary with the extracted code structure
     """
+    logger.info(f"Parsing code snippet for language: {language}")
     if not code or not language:
+        logger.error("Code snippet or language not provided")
         return {"success": False, "error": "Code or language not provided"}
     
-    module = parse_code(code, language)
-    if not module:
-        return {"success": False, "error": f"Failed to parse {language} code"}
+    try:
+        module = parse_code(code, language)
+        if not module:
+            logger.error(f"Failed to parse {language} code snippet")
+            return {"success": False, "error": f"Failed to parse {language} code"}
+    except Exception as e:
+        logger.exception(f"Error parsing {language} code snippet: {str(e)}", exc_info=True)
+        return {"success": False, "error": f"Error parsing code: {str(e)}"}
     
     result = {
         "success": True,
@@ -100,6 +120,7 @@ def parse_code_snippet(code: str, language: str) -> Dict[str, Any]:
             
         result["classes"].append(class_info)
     
+    logger.info(f"Successfully parsed code snippet for {language}")
     return result
 
 def get_function_details(file_path: str, function_name: str) -> Dict[str, Any]:
@@ -113,12 +134,19 @@ def get_function_details(file_path: str, function_name: str) -> Dict[str, Any]:
     Returns:
         Dictionary with function details or error
     """
+    logger.info(f"Getting details for function '{function_name}' in {file_path}")
     if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
         return {"success": False, "error": f"File not found: {file_path}"}
     
-    module = parse_file(file_path)
-    if not module:
-        return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    try:
+        module = parse_file(file_path)
+        if not module:
+            logger.error(f"Failed to parse file for function details: {file_path}")
+            return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    except Exception as e:
+        logger.exception(f"Error parsing file {file_path} for function details: {str(e)}", exc_info=True)
+        return {"success": False, "error": f"Error parsing file: {str(e)}"}
     
     # Try to find the function in the module
     for func in module.functions:
@@ -151,6 +179,7 @@ def get_function_details(file_path: str, function_name: str) -> Dict[str, Any]:
                     "language": module.language
                 }
     
+    logger.warning(f"Function '{function_name}' not found in {file_path}")
     return {
         "success": False,
         "error": f"Function '{function_name}' not found in {file_path}"
@@ -167,12 +196,19 @@ def get_class_details(file_path: str, class_name: str) -> Dict[str, Any]:
     Returns:
         Dictionary with class details including its methods
     """
+    logger.info(f"Getting details for class '{class_name}' in {file_path}")
     if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
         return {"success": False, "error": f"File not found: {file_path}"}
     
-    module = parse_file(file_path)
-    if not module:
-        return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    try:
+        module = parse_file(file_path)
+        if not module:
+            logger.error(f"Failed to parse file for class details: {file_path}")
+            return {"success": False, "error": f"Failed to parse file: {file_path}"}
+    except Exception as e:
+        logger.exception(f"Error parsing file {file_path} for class details: {str(e)}", exc_info=True)
+        return {"success": False, "error": f"Error parsing file: {str(e)}"}
     
     # Try to find the class in the module
     for cls in module.classes:
@@ -200,6 +236,7 @@ def get_class_details(file_path: str, class_name: str) -> Dict[str, Any]:
                 
             return result
     
+    logger.warning(f"Class '{class_name}' not found in {file_path}")
     return {
         "success": False,
         "error": f"Class '{class_name}' not found in {file_path}"
@@ -223,6 +260,8 @@ def get_supported_languages() -> Dict[str, Any]:
             extensions_by_language[lang] = []
         extensions_by_language[lang].append(ext)
     
+    logger.info("Getting list of supported languages")
+    logger.debug(f"Supported languages: {languages}")
     return {
         "success": True,
         "supported_languages": sorted(list(languages)),

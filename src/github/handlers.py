@@ -6,10 +6,11 @@ This module contains handler functions for GitHub events.
 """
 
 import json
-import logging
 from typing import Dict, Any, Optional
 
-from ..utils.logging import logger
+from ..utils.logging import core_logger
+
+logger = core_logger()
 
 async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     """

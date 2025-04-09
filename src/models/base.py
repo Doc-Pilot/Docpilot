@@ -9,12 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from contextlib import contextmanager
-import logging
 
 from ..utils.config import get_settings
 from ..database import Base
+from ..utils.logging import core_logger  # Import core_logger
 
-logger = logging.getLogger(__name__)
+logger = core_logger()
 settings = get_settings()
 
 # Create the SQLAlchemy engine
@@ -47,7 +47,7 @@ def get_db_session() -> Session:
         session.commit()
     except Exception as e:
         session.rollback()
-        logger.error(f"Database error: {str(e)}")
+        logger.error(f"Database error: {str(e)}", exc_info=True)
         raise
     finally:
         session.close()

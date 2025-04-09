@@ -5,7 +5,6 @@ Docpilot API Application
 Main FastAPI application for Docpilot.
 """
 
-import logging
 import os
 import sys
 from fastapi import FastAPI, Request
@@ -19,26 +18,27 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 # Import project modules after path setup
-try:
-    import logfire
-except ImportError:
-    logfire = None
-
 from src.utils.config import get_settings
 from src.database import init_db
 from src.api.github_webhook import router as github_router
+from src.utils.logging import fastapi_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Get settings
+settings = get_settings()
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="Docpilot API",
+    description="API for Docpilot, an AI-powered documentation assistant",
+    version="0.1.0"
 )
-logger = logging.getLogger("fastapi")
+
+# Configure Logfire for FastAPI
+logger = fastapi_logger(app)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
-    settings = get_settings()
     logger.info(
         "DocPilot API starting up",
         extra={
@@ -54,13 +54,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("DocPilot API shutting down")
 
-# Initialize the FastAPI application
-app = FastAPI(
-    title="Docpilot API",
-    description="API for Docpilot, an AI-powered documentation assistant",
-    version="0.1.0",
-    lifespan=lifespan
-)
+# Assign lifespan to the app after logger is initialized
+app.router.lifespan_context = lifespan
 
 # Configure CORS
 app.add_middleware(
@@ -74,15 +69,12 @@ app.add_middleware(
 # Include routers
 app.include_router(github_router)
 
-# Instrument FastAPI with Logfire if available
-try:
-    logfire.instrument_fastapi(app)
-except (ImportError, AttributeError):
-    logger.warning("Logfire FastAPI instrumentation not available")
+# Logfire instrumentation is handled by fastapi_logger, no need for manual call
 
 @app.get("/")
 async def root():
     """Root endpoint returning basic API information"""
+    logger.info("Root endpoint requested")
     return {
         "name": "Docpilot API",
         "version": "0.1.0",
@@ -92,7 +84,6 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    settings = get_settings()
     logger.debug(
         "Health check requested",
         extra={"environment": settings.app_env}
@@ -102,7 +93,7 @@ async def health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler for unhandled exceptions"""
-    logger.exception(f"Unhandled exception: {str(exc)}")
+    logger.exception(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={
@@ -118,12 +109,8 @@ def create_app() -> FastAPI:
     
     Can be used for testing or when more setup is needed before returning the app.
     """
-    # Initialize additional resources or configurations if needed
-    settings = get_settings()
-    
     # Log configuration details
-    logger.info(f"Starting Docpilot API in {settings.app_env} environment")
-    
+    logger.info(f"Creating Docpilot API app in {settings.app_env} environment")
     return app
 
 if __name__ == "__main__":
