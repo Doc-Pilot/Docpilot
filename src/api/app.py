@@ -6,19 +6,27 @@ Main FastAPI application for Docpilot.
 """
 
 import logging
+import os
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
-import logfire
 
-from ..utils import get_settings
-from ..database import init_db
-from .github_webhook import router as github_router
+# Add the project root to sys.path when running directly
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-# Get logger
-logger = logging.getLogger(__name__)
+# Import project modules after path setup
+try:
+    import logfire
+except ImportError:
+    logfire = None
+
+from src.utils.config import get_settings
+from src.database import init_db
+from src.api.github_webhook import router as github_router
 
 # Configure logging
 logging.basicConfig(
@@ -119,4 +127,4 @@ def create_app() -> FastAPI:
     return app
 
 if __name__ == "__main__":
-    uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True) 
