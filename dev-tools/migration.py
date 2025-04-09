@@ -35,22 +35,44 @@ def create_initial_schema():
     print("Creating initial schema migration...")
     print("This will create a migration based on current SQLAlchemy models.")
     
-    # Import models to ensure they're loaded
-    from src.models.base import Base
+    # Import Base from the database module
+    from src.database import Base
     
-    # Import all models to ensure they're registered with Base
+    # Register all models by importing the models package
     try:
-        from src.models import (
-            User, Installation, SubscriptionPlan, Repository, 
-            DocumentFile, UserAccess, Subscription, Usage, UsageSummary,
-            InstallationSettings, RepositorySettings
-        )
-        print("Models imported successfully")
+        # Import models package to get all model classes
+        import src.models
+        src.models.register_models()  # Call the function to register all models
+        
+        # Print model tables that will be created
+        print(f"Detected {len(Base.metadata.tables)} tables in SQLAlchemy models:")
+        for table_name in Base.metadata.tables.keys():
+            print(f"  - {table_name}")
+            
+        if len(Base.metadata.tables) == 0:
+            print("ERROR: No tables found in SQLAlchemy models!")
+            print("Make sure all models are using the correct Base class from src.database")
+            print("Checking database.py Base vs models.base.py Base...")
+            
+            # Check if there's a mismatch in Base classes
+            from src.models.base import Base as ModelsBase
+            print(f"database.py Base id: {id(Base)}")
+            print(f"models/base.py Base id: {id(ModelsBase)}")
+            
+            if id(Base) != id(ModelsBase):
+                print("WARNING: Found different Base classes! Models may be registered with the wrong Base.")
+                print("Attempting to unify Base classes...")
+                # Use the database.py Base for our migration
+                ModelsBase = Base
+                
+            return
     except ImportError as e:
-        print(f"Warning: Could not import all models: {e}")
+        print(f"WARNING: Could not import all models: {e}")
         print("Migration may be incomplete")
+        return
     
-    # Create migration
+    # Create migration with debugging enabled
+    print("Creating migration with autogenerate...")
     run_alembic_command("revision", "--autogenerate", "-m", "Initial schema")
     print("Initial schema migration created.")
     print("You can now run 'python dev-tools/migration.py upgrade' to apply it.")
@@ -74,7 +96,18 @@ def show_current():
 def init_db():
     """Initialize database with Alembic and populate default data."""
     # First upgrade to latest migration
+    print("Applying migrations...")
     upgrade()
+    
+    print("Checking database tables...")
+    # Connect to database and list tables
+    from sqlalchemy import inspect
+    from src.database import engine
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    print(f"Current database has {len(tables)} tables:")
+    for table in tables:
+        print(f"  - {table}")
     
     # Then populate with default data
     print("Populating database with default data...")
