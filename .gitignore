@@ -53,4 +53,7 @@ logs/
 
 # OS specific
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Migration
+alembic/versions/*_dev_*.py
