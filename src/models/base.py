@@ -6,13 +6,13 @@ This module provides the base SQLAlchemy configuration for all models.
 """
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 from contextlib import contextmanager
 import logging
 
 from ..utils.config import get_settings
+from ..database import Base
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -28,9 +28,6 @@ engine = create_engine(
 
 # Create a session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create the base class for declarative models
-Base = declarative_base()
 
 @contextmanager
 def get_db_session() -> Session:

@@ -6,21 +6,29 @@ Handles database connection, session management, and initialization.
 """
 
 import os
-from sqlalchemy import create_engine, JSON, Text, event, MetaData, Table, inspect
+import logging
+from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 from contextlib import contextmanager
-from src.utils import logger
 from sqlalchemy.exc import SQLAlchemyError
-import logging
 
-# Get database URL from environment or use SQLite as default
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///docpilot.db')
+from src.utils.config import get_settings
 
-# Create engine based on URL
+settings = get_settings()
+
+# Get database URL
+DATABASE_URL = settings.database_url
+
+# Create engine based on URL with improved connection pooling
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {},
+    # Connection pooling settings for production
+    pool_size=5 if not DATABASE_URL.startswith('sqlite') else None,
+    max_overflow=10 if not DATABASE_URL.startswith('sqlite') else None,
+    pool_timeout=30 if not DATABASE_URL.startswith('sqlite') else None,
+    pool_recycle=3600 if not DATABASE_URL.startswith('sqlite') else None,
     echo=os.environ.get('SQL_ECHO', 'false').lower() == 'true'
 )
 
