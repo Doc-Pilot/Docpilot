@@ -14,6 +14,7 @@ import uvicorn
 import logfire
 
 from ..utils import get_settings
+from ..database import init_db
 from .github_webhook import router as github_router
 
 # Get logger
@@ -37,6 +38,11 @@ async def lifespan(app: FastAPI):
             "debug_mode": settings.debug
         }
     )
+    
+    # Initialize the database
+    logger.info("Initializing database")
+    init_db()
+    
     yield
     logger.info("DocPilot API shutting down")
 
@@ -112,6 +118,5 @@ def create_app() -> FastAPI:
     
     return app
 
-# This allows the app to be imported and used with different ASGI servers
 if __name__ == "__main__":
     uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True) 
