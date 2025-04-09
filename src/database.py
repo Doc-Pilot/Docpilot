@@ -13,14 +13,34 @@ from contextlib import contextmanager
 from src.utils import logger
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from dotenv import load_dotenv
 
-# Get database URL from environment or use SQLite as default
-DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///docpilot.db')
+# Load environment variables
+load_dotenv()
 
-# Create engine based on URL
+# Determine database URL based on environment
+def get_database_url():
+    """Get database URL based on current environment."""
+    app_env = os.getenv("APP_ENV", "development")
+    if app_env == "production":
+        return os.getenv("PROD_DATABASE_URL")
+    elif app_env == "testing":
+        return os.getenv("TEST_DATABASE_URL")
+    else:
+        return os.getenv("DEV_DATABASE_URL")
+
+# Get database URL
+DATABASE_URL = get_database_url()
+
+# Create engine based on URL with improved connection pooling
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {},
+    # Connection pooling settings for production
+    pool_size=5 if not DATABASE_URL.startswith('sqlite') else None,
+    max_overflow=10 if not DATABASE_URL.startswith('sqlite') else None,
+    pool_timeout=30 if not DATABASE_URL.startswith('sqlite') else None,
+    pool_recycle=3600 if not DATABASE_URL.startswith('sqlite') else None,
     echo=os.environ.get('SQL_ECHO', 'false').lower() == 'true'
 )
 
