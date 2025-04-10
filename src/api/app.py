@@ -48,7 +48,6 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize the database
-    logger.info("Initializing database")
     init_db()
     
     yield
@@ -69,8 +68,6 @@ app.add_middleware(
 # Include routers
 app.include_router(github_router)
 
-# Logfire instrumentation is handled by fastapi_logger, no need for manual call
-
 @app.get("/")
 async def root():
     """Root endpoint returning basic API information"""
@@ -78,7 +75,7 @@ async def root():
     return {
         "name": "Docpilot API",
         "version": "0.1.0",
-        "description": "AI-powered documentation assistant"
+        "description": "AI-powered documentation assistant tool."
     }
 
 @app.get("/health")
@@ -103,18 +100,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-def create_app() -> FastAPI:
-    """
-    Create and configure the FastAPI application.
-    
-    Can be used for testing or when more setup is needed before returning the app.
-    """
-    # Log configuration details
-    logger.info(f"Creating Docpilot API app in {settings.app_env} environment")
-    return app
-
 if __name__ == "__main__":
     if settings.app_env == "development":
         uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True)
     else:
-        uvicorn.run(app, host="0.0.0.0", port=8000) 
+        uvicorn.run(app, host="0.0.0.0", port=8000)
