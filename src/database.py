@@ -6,7 +6,6 @@ Handles database connection, session management, and initialization.
 """
 
 import os
-import logging
 from sqlalchemy import create_engine, event, JSON
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
@@ -14,7 +13,9 @@ from contextlib import contextmanager
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.utils.config import get_settings
+from src.utils.logging import sqlalchemy_logger, core_logger
 
+logger = core_logger()
 settings = get_settings()
 
 # Get database URL
@@ -31,6 +32,9 @@ engine = create_engine(
     pool_recycle=3600 if not DATABASE_URL.startswith('sqlite') else None,
     echo=os.environ.get('SQL_ECHO', 'false').lower() == 'true'
 )
+
+# Instrument the engine with Logfire
+sqlalchemy_logger(engine)
 
 # Create session factory
 SessionFactory = sessionmaker(bind=engine)
@@ -105,7 +109,6 @@ def init_db():
         # Create engine with configured URL
         engine = create_engine(DATABASE_URL)
         
-        logger = logging.getLogger(__name__)
         logger.info("Initializing database tables...")
         
         # Phase 1: Create tables with no dependencies
@@ -150,7 +153,7 @@ def init_db():
         logger.info("Database initialization completed successfully")
         create_default_data()
     except SQLAlchemyError as e:
-        logger.error(f"Database initialization failed: {str(e)}")
+        logger.error(f"Database initialization failed: {str(e)}", exc_info=True)
         raise
 
 def create_default_data():
@@ -238,7 +241,7 @@ def get_connection():
     try:
         return engine.connect()
     except SQLAlchemyError as e:
-        logger.error(f"Database connection error: {e}")
+        logger.error(f"Database connection error: {e}", exc_info=True)
         raise
 
 @contextmanager

@@ -14,7 +14,9 @@ import aiofiles
 import asyncio
 
 from ..utils.config import get_settings
-from ..utils.logging import logger
+from ..utils.logging import core_logger
+
+logger = core_logger()
 
 class InstallationStore:
     """
@@ -61,7 +63,7 @@ class InstallationStore:
                 
             logger.info(f"Loaded {len(self.installations)} GitHub App installations")
         except Exception as e:
-            logger.exception(f"Error loading installations: {str(e)}")
+            logger.exception(f"Error loading installations: {str(e)}", exc_info=True)
             # Initialize with empty dict if there's an error
             self.installations = {}
             
@@ -76,7 +78,7 @@ class InstallationStore:
                 
             logger.info(f"Saved {len(self.installations)} GitHub App installations")
         except Exception as e:
-            logger.exception(f"Error saving installations: {str(e)}")
+            logger.exception(f"Error saving installations: {str(e)}", exc_info=True)
             
     async def add_installation(
         self,
@@ -255,26 +257,26 @@ class InstallationStore:
             
         installation = self.installations.get(installation_id)
         if not installation:
+            logger.warning(f"Installation {installation_id} not found")
             return None
             
-        # Check if token exists and is still valid
         token = installation.get("access_token")
-        expires_str = installation.get("token_expires_at")
+        expires_at_str = installation.get("token_expires_at")
         
-        if not token or not expires_str:
+        if not token or not expires_at_str:
+            logger.info(f"No token data for installation {installation_id}")
             return None
             
         try:
-            # Parse expiration time
-            expires_at = datetime.fromisoformat(expires_str)
+            expires_at = datetime.fromisoformat(expires_at_str)
+        except ValueError:
+            logger.error(f"Invalid token expiration format for installation {installation_id}")
+            return None
             
-            # Add a buffer to ensure we don't use tokens that are about to expire
-            buffer = timedelta(minutes=5)
+        # Check if token has expired (add a 5-minute buffer)
+        if datetime.now() >= expires_at - timedelta(minutes=5):
+            logger.info(f"Token for installation {installation_id} has expired or is about to expire")
+            return None
             
-            # Check if token is still valid
-            if datetime.now() + buffer < expires_at:
-                return token
-        except Exception as e:
-            logger.warning(f"Error parsing token expiration: {str(e)}")
-            
-        return None 
+        logger.debug(f"Returning valid token for installation {installation_id}")
+        return token 

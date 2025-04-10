@@ -12,7 +12,12 @@ These tools can be used independently or combined into workflows/pipelines.
 """
 
 # Logging and configuration
-from .logging import logger
+from .logging import (
+    core_logger,
+    fastapi_logger,
+    pydantic_logger,
+    sqlalchemy_logger
+)
 from .config import get_settings
 
 # Repository scanning
@@ -27,11 +32,6 @@ from .metrics import (
 
 # Code parsing and structure extraction
 from .code_parser import (
-    # Core data structures
-    CodeModule,
-    CodeClass,
-    CodeFunction,
-    
     # Main functions
     parse_file,
     parse_code,
@@ -58,7 +58,10 @@ from .doc_scanner import (
 # Organize exports by category for better readability and discoverability
 __all__ = [
     # Configuration and logging
-    "logger",
+    "core_logger",
+    "fastapi_logger",
+    "pydantic_logger",
+    "sqlalchemy_logger",
     "get_settings",
     
     # Cost and token utilities

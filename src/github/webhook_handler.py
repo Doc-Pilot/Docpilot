@@ -6,11 +6,12 @@ Simple handler for GitHub webhooks to test integration with GitHub Apps.
 """
 
 import json
-import logging
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
-from ..utils.logging import logger
+from ..utils.logging import core_logger
+
+logger = core_logger()
 
 class WebhookHandler:
     """
@@ -107,7 +108,7 @@ class WebhookHandler:
                 logger.info(f"Generic {event_type} event from {sender} for {repo}")
                 
         except Exception as e:
-            logger.error(f"Error logging payload summary: {str(e)}")
+            logger.error(f"Error logging payload summary: {str(e)}", exc_info=True)
     
     async def handle_push_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """

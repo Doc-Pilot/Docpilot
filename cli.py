@@ -18,7 +18,6 @@ Usage:
 import os
 import sys
 import json
-import logging
 import argparse
 import traceback
 from typing import Dict, Any, Optional, List, Union
@@ -27,15 +26,12 @@ from typing import Dict, Any, Optional, List, Union
 if __name__ == "__main__":
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Import OrchestratorAgent
+# Import project components
 from src.agents.orchestrator import OrchestratorAgent
+from src.utils.logging import core_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Configure Logfire logging
+logger = core_logger()
 
 def setup_argument_parser() -> argparse.ArgumentParser:
     """
@@ -242,6 +238,7 @@ def show_metrics_handler(args: argparse.Namespace) -> Dict[str, Any]:
         return {"success": True}
         
     except Exception as e:
+        logger.error(f"Failed to read metrics file: {str(e)}", exc_info=True)
         return {
             "success": False,
             "error": f"Failed to read metrics file: {str(e)}"
@@ -254,55 +251,50 @@ def main() -> int:
     Returns:
         Exit code (0 for success, non-zero for error)
     """
-    # Setup argument parser
     parser = setup_argument_parser()
-    
-    # Parse arguments
     args = parser.parse_args()
-    
-    # Check if command is specified
+
+    # Set log level based on verbose flag
+    if args.verbose:
+        # In a real app, you might configure Logfire differently here
+        logger.info("Verbose mode enabled")
+
     if not args.command:
         parser.print_help()
         return 1
-    
+
+    # Execute command handler
     try:
-        # Handle commands
-        if args.command == "scan":
-            result = scan_repo_handler(args)
-        elif args.command == "analyze":
-            result = analyze_repo_handler(args)
-        elif args.command == "docs":
-            result = generate_docs_handler(args)
-        elif args.command == "metrics":
-            result = show_metrics_handler(args)
+        handler_map = {
+            "scan": scan_repo_handler,
+            "analyze": analyze_repo_handler,
+            "docs": generate_docs_handler,
+            "metrics": show_metrics_handler,
+        }
+        handler = handler_map.get(args.command)
+
+        if handler:
+            logger.info(f"Executing command: {args.command}")
+            result = handler(args)
+            if result.get("success", False):
+                logger.info(f"Command '{args.command}' completed successfully")
+                print(json.dumps(result, indent=2))
+                return 0
+            else:
+                logger.error(f"Command '{args.command}' failed: {result.get('error', 'Unknown error')}")
+                print(f"Error: {result.get('error', 'Unknown error')}")
+                return 1
         else:
+            logger.error(f"Unknown command: {args.command}")
+            print(f"Error: Unknown command '{args.command}'")
             parser.print_help()
             return 1
-        
-        # Check result
-        if not result.get("success", False):
-            error_message = result.get("error", "Unknown error")
-            logger.error(f"Command failed: {error_message}")
-            print(f"\nError: {error_message}")
-            return 1
-        
-        # Success
-        return 0
-    
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
-        return 130  # Standard exit code for SIGINT
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        print(f"\nAn unexpected error occurred: {str(e)}")
-        
-        # Show debugging info in verbose mode
-        if "--verbose" in sys.argv or "-v" in sys.argv:
-            print("\nStack trace:")
-            traceback.print_exc()
-        else:
-            print("Run with --verbose for more details.")
-        
+        logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+        print(f"An unexpected error occurred: {str(e)}")
+        # Print stack trace if verbose
+        if args.verbose:
+            print(traceback.format_exc())
         return 1
 
 if __name__ == "__main__":

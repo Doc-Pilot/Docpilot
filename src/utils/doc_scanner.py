@@ -8,7 +8,6 @@ them with code changes to identify documentation that needs updating.
 
 import os
 import re
-import logging
 import fnmatch
 import subprocess
 import shutil
@@ -16,7 +15,9 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple, Union
 from functools import lru_cache
 
-logger = logging.getLogger(__name__)
+from ..utils.logging import core_logger
+
+logger = core_logger()
 
 # Documentation file patterns
 DOC_PATTERNS = [
@@ -86,10 +87,10 @@ def run_git_command(repo_path: str, cmd: List[str], timeout: int = 10, fallback:
             return fallback
         return result.stdout.strip()
     except subprocess.TimeoutExpired:
-        logger.error(f"Git command timed out after {timeout}s: {' '.join(cmd)}")
+        logger.error(f"Git command timed out after {timeout}s: {' '.join(cmd)}", exc_info=True)
         return fallback
     except UnicodeDecodeError as e:
-        logger.error(f"Encoding error in git command: {str(e)}")
+        logger.error(f"Encoding error in git command: {str(e)}", exc_info=True)
         # Try again without text mode
         try:
             # Fall back to binary mode and decode manually
@@ -101,7 +102,7 @@ def run_git_command(repo_path: str, cmd: List[str], timeout: int = 10, fallback:
         except Exception:
             return fallback
     except Exception as e:
-        logger.error(f"Git error: {str(e)}")
+        logger.error(f"Git error: {str(e)}", exc_info=True)
         return fallback
 
 def is_ignored_by_git(repo_path: str, file_path: str) -> bool:
@@ -130,7 +131,7 @@ def is_ignored_by_git(repo_path: str, file_path: str) -> bool:
         # If the command was successful, the file is ignored
         return True
     except Exception as e:
-        logger.warning(f"Error checking if file is ignored: {str(e)}")
+        logger.warning(f"Error checking if file is ignored: {str(e)}", exc_info=True)
         # Fall back to not ignoring in case of error
         return False
 

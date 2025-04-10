@@ -13,7 +13,12 @@ from pydantic_ai import Agent
 from pydantic import BaseModel
 from typing import TypeVar, Generic, Optional, Any, Callable, Type, ClassVar
 
-from ..utils import logger, get_settings, extract_usage_from_result, Usage
+from ..utils.config import get_settings
+from ..utils.logging import pydantic_logger
+from ..utils.metrics import extract_usage_from_result, Usage
+
+# Initialize Pydantic logger
+logger = pydantic_logger()
 
 # Define types for dependency injection and results
 DepsT = TypeVar('DepsT')
@@ -135,7 +140,7 @@ class BaseAgent(Generic[DepsT, ResultT]):
             deps_type=self._deps_type,
             result_type=self._result_type,
             system_prompt=self._system_prompt,
-            instrument=True,
+            instrument=False,
             model_settings={
                 "temperature": self.config.temperature,
                 "max_tokens": self.config.max_tokens,
@@ -215,7 +220,8 @@ class BaseAgent(Generic[DepsT, ResultT]):
                     attempt=attempts,
                     max_attempts=self.config.retry_attempts,
                     error=str(e),
-                    wait_time=wait_time
+                    wait_time=wait_time,
+                    exc_info=True
                 )
                 
                 # Don't wait if this was the last attempt
@@ -294,7 +300,8 @@ class BaseAgent(Generic[DepsT, ResultT]):
                     attempt=attempts,
                     max_attempts=self.config.retry_attempts,
                     error=str(e),
-                    wait_time=wait_time
+                    wait_time=wait_time,
+                    exc_info=True
                 )
                 
                 # Don't wait if this was the last attempt

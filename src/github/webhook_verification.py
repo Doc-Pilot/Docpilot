@@ -7,13 +7,13 @@ Utilities for verifying the authenticity of GitHub webhooks.
 
 import hmac
 import hashlib
-import logging
 from typing import Optional, Tuple, Dict, Any
 import time
 
 from ..utils.config import get_settings
+from ..utils.logging import core_logger
 
-logger = logging.getLogger(__name__)
+logger = core_logger()
 
 def verify_webhook_signature(
     signature_header: str,
@@ -84,7 +84,7 @@ def verify_webhook_signature(
             logger.warning(f"Signatures don't match: got {signature[:10]}..., expected {expected_signature[:10]}...")
             return False, "Invalid signature"
     except Exception as e:
-        logger.exception(f"Error verifying webhook signature: {str(e)}")
+        logger.exception(f"Error verifying webhook signature: {str(e)}", exc_info=True)
         return False, f"Verification error: {str(e)}"
 
 def extract_webhook_metadata(

@@ -23,9 +23,10 @@ from ..utils.doc_scanner import (
     check_for_significant_changes,
     get_last_modified
 )
+from ..utils.logging import core_logger  # Import core_logger
 
 # Set up module logger
-logger = logging.getLogger(__name__)
+logger = core_logger()
 
 def standard_error_response(error_message: str, error_type: str = "unexpected_error") -> Dict[str, Any]:
     """
@@ -38,7 +39,7 @@ def standard_error_response(error_message: str, error_type: str = "unexpected_er
     Returns:
         Standardized error response dictionary
     """
-    logger.error(f"{error_type}: {error_message}")
+    logger.error(f"{error_type}: {error_message}", exc_info=True)
     return {
         "success": False, 
         "error": error_message, 
@@ -160,10 +161,10 @@ def find_docs_to_update(repo_path: str, base_ref: str = "HEAD~1", target_ref: st
             "all_docs": list(doc_files.keys())
         }
     except subprocess.SubprocessError as e:
-        logger.error(f"Git subprocess error: {str(e)}")
+        logger.error(f"Git subprocess error: {str(e)}", exc_info=True)
         return standard_error_response(f"Git command failed: {str(e)}", "git_error")
     except Exception as e:
-        logger.error(f"Error finding docs to update: {str(e)}")
+        logger.error(f"Error finding docs to update: {str(e)}", exc_info=True)
         return standard_error_response(f"Error finding docs to update: {str(e)}", "unexpected_error")
 
 def get_doc_update_suggestions(repo_path: str, doc_path: str, related_files: List[str]) -> Dict[str, Any]:
@@ -218,7 +219,7 @@ def get_doc_update_suggestions(repo_path: str, doc_path: str, related_files: Lis
                     with open(file_path, 'r', encoding='utf-8') as f:
                         related_file_content[file] = f.read()
                 except Exception as file_error:
-                    logger.warning(f"Error reading related file {file}: {str(file_error)}")
+                    logger.warning(f"Error reading related file {file}: {str(file_error)}", exc_info=True)
                     # Skip files we can't read but don't fail the whole operation
                     continue
         
@@ -261,8 +262,8 @@ def get_doc_update_suggestions(repo_path: str, doc_path: str, related_files: Lis
             "update_needed": significant_changes.get("has_significant_changes", False) or len(suggestions) > 0
         }
     except Exception as e:
-        logger.error(f"Error generating update suggestions: {str(e)}")
-        return standard_error_response(f"Error generating update suggestions: {str(e)}", "suggestion_error")
+        logger.error(f"Error generating update suggestions: {str(e)}", exc_info=True)
+        return standard_error_response(f"Error generating update suggestions: {str(e)}", "suggestions_error")
 
 def get_doc_content(repo_path: str, doc_path: str) -> Dict[str, Any]:
     """
@@ -314,5 +315,5 @@ def get_doc_content(repo_path: str, doc_path: str) -> Dict[str, Any]:
         logger.warning(f"Unable to read {doc_path} as text, may be binary file")
         return standard_error_response(f"Unable to read {doc_path} as text", "encoding_error")
     except Exception as e:
-        logger.error(f"Error getting document content: {str(e)}")
-        return standard_error_response(f"Error getting document content: {str(e)}", "unexpected_error")
+        logger.error(f"Error reading documentation file: {str(e)}", exc_info=True)
+        return standard_error_response(f"Error reading documentation file: {str(e)}", "file_read_error")

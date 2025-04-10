@@ -19,16 +19,9 @@ import sys
 from typing import Any, List, Optional, Dict
 from dataclasses import dataclass, field
 
-# Set up basic logging if .logging is not available
-try:
-    from .logging import logger
-except ImportError:
-    logger = logging.getLogger("docpilot.code_parser")
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s.%(msecs)03d %(message)s', datefmt='%H:%M:%S')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+# Use core logger for this module
+from .logging import core_logger
+logger = core_logger()
 
 # Check if environment variable is set to force fallback parser
 FORCE_FALLBACK = os.environ.get('DOCPILOT_USE_FALLBACK_PARSER') == '1'
@@ -244,7 +237,7 @@ class TreeSitterParser:
             language_name = FILE_EXT_TO_LANGUAGE.get(ext)
             
             if not language_name:
-                logger.warning(f"Unsupported file type: {file_path}")
+                logger.warning(f"Unsupported file type for parsing: {file_path}")
                 return None
                 
             # Create module
@@ -339,114 +332,40 @@ class TreeSitterParser:
             # Fallback to regex parsing
             return TreeSitterParser._fallback_parse(source_code, language_name, file_path)
                 
+        except FileNotFoundError:
+            logger.error(f"File not found: {file_path}")
+            return None
         except Exception as e:
-            logger.error(f"Error parsing file {file_path}: {e}")
+            logger.error(f"Error parsing file {file_path}: {str(e)}", exc_info=True)
             return None
     
     @staticmethod
     def _get_language_lib(language_name: str) -> Optional[Any]:
-        """Get the Tree-sitter language library."""
-        if not language_name:
+        """Get the tree-sitter Language object for a given language name."""
+        if not TREE_SITTER_AVAILABLE:
             return None
-            
-        # Normalize language name
-        normalized_name = language_name.lower().replace('-', '_')
         
-        # First try with tree-sitter-languages
         try:
-            from tree_sitter_languages import get_language
-            try:
-                # This will work with tree-sitter < 0.22
-                return get_language(normalized_name)
-            except TypeError as e:
-                # TypeError might be raised if using tree-sitter >= 0.22
-                if "takes 1 positional argument but 2 were given" in str(e):
-                    logger.warning(f"Compatibility issue with tree-sitter >= 0.22. Try downgrading to tree-sitter==0.21.3")
-                raise
-        except (ImportError, ModuleNotFoundError):
-            # If tree-sitter-languages is not installed, try direct language imports
-            pass
+            # Prefer tree-sitter-language-pack if available
+            if LANGUAGE_PACK_AVAILABLE:
+                return get_language(language_name)
+            # Fallback to tree-sitter-languages
+            elif hasattr(tree_sitter_languages, 'get_language'):
+                return tree_sitter_languages.get_language(language_name)
+            else:
+                # Very basic fallback if only core tree-sitter is installed
+                # This usually requires manual setup of language grammars
+                logger.warning("Basic tree-sitter requires manual language grammar setup")
+                return None
         except Exception as e:
-            logger.warning(f"Error using tree-sitter-languages.get_language: {e}")
-        
-        # Try direct imports as fallback
-        try:
-            # For Python
-            if normalized_name == 'python':
-                try:
-                    from tree_sitter_python import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For JavaScript/TypeScript
-            elif normalized_name in ('javascript', 'js'):
-                try:
-                    from tree_sitter_javascript import language
-                    return language
-                except ImportError:
-                    pass
-            elif normalized_name in ('typescript', 'ts'):
-                try:
-                    from tree_sitter_typescript import language_typescript as language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For Ruby
-            elif normalized_name == 'ruby':
-                try:
-                    from tree_sitter_ruby import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For Go
-            elif normalized_name == 'go':
-                try:
-                    from tree_sitter_go import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For Rust
-            elif normalized_name == 'rust':
-                try:
-                    from tree_sitter_rust import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For Java
-            elif normalized_name == 'java':
-                try:
-                    from tree_sitter_java import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            # For C/C++
-            elif normalized_name in ('c', 'cpp', 'c++'):
-                try:
-                    if normalized_name == 'c':
-                        from tree_sitter_c import language
-                    else:
-                        from tree_sitter_cpp import language
-                    return language
-                except ImportError:
-                    pass
-                    
-            logger.warning(f"No direct import found for language: {language_name}")
-        except Exception as e:
-            logger.warning(f"Error importing language module for {language_name}: {e}")
-            
-        return None
+            logger.error(f"Failed to load tree-sitter language '{language_name}': {str(e)}")
+            return None
     
     @staticmethod
     def _extract_module_docstring(root_node: Any, source_code: str, module: CodeModule) -> None:
-        """Extract module-level docstring."""
-        if module.language == 'python':
-            # Check if root_node has children before iterating
+        """Extract the module-level docstring."""
+        try:
+            # Find the first node that could be a docstring
             if not hasattr(root_node, 'children') or not root_node.children:
                 return
                 
@@ -460,24 +379,17 @@ class TreeSitterParser:
                         if grandchild.type == 'string' and child.start_point[0] <= 1:  # First or second line
                             module.docstring = TreeSitterParser._get_node_text(grandchild, source_code)
                             return
+        except Exception as e:
+            logger.warning(f"Error extracting module docstring: {str(e)}", exc_info=True)
     
     @staticmethod
     def _execute_query(query: Any, node: Any) -> Any:
-        """Execute a query on a node, returning the raw results to handle different formats."""
-        if node is None:
-            logger.warning("Cannot execute query: node is None")
-            return {}
-        
-        if not hasattr(query, 'captures'):
-            logger.warning("Invalid query object: missing required methods")
-            return {}
-            
+        """Execute a tree-sitter query."""
         try:
-            # Execute the query - handle different formats in the calling method
             return query.captures(node)
         except Exception as e:
-            logger.error(f"Error executing query: {e}")
-            return {}
+            logger.warning(f"Error executing tree-sitter query: {str(e)}", exc_info=True)
+            return []
             
     @staticmethod
     def _extract_functions(root_node: Any, source_code: str, language: Any, module: CodeModule) -> None:
@@ -1034,10 +946,7 @@ class TreeSitterParser:
     
     @staticmethod
     def _extract_docstring(body_node: Any, source_code: str) -> Optional[str]:
-        """Extract docstring from a body node."""
-        if not body_node or not hasattr(body_node, 'children') or not body_node.children:
-            return None
-            
+        """Extract a docstring from a function/class/method body."""
         try:
             for child in body_node.children:
                 if child.type == 'expression_statement':
@@ -1050,9 +959,8 @@ class TreeSitterParser:
                 elif child.type == 'string':
                     return TreeSitterParser._get_node_text(child, source_code)
         except Exception as e:
-            logger.error(f"Error extracting docstring: {e}")
-            
-        return None
+            logger.warning(f"Error extracting docstring: {str(e)}", exc_info=True)
+            return None
     
     @staticmethod
     def _get_node_text(node: Any, source_code: str) -> str:
@@ -1103,11 +1011,12 @@ class TreeSitterParser:
     
     @staticmethod
     def _fallback_parse(source_code: str, language_name: str, file_path: Optional[str] = None) -> Optional[CodeModule]:
-        """Fallback to regex parsing for supported languages."""
-        if language_name == 'python':
+        """Fallback parser using regex when tree-sitter is unavailable."""
+        logger.info(f"Using fallback regex parser for {language_name}")
+        if language_name == "python":
             return fallback_parse_python(source_code, file_path)
         else:
-            logger.warning(f"No fallback parser for {language_name}")
+            logger.warning(f"Fallback parser not implemented for {language_name}")
             return None
 
     @staticmethod

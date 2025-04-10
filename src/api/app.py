@@ -5,32 +5,40 @@ Docpilot API Application
 Main FastAPI application for Docpilot.
 """
 
-import logging
+import os
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import uvicorn
-import logfire
 
-from ..utils import get_settings
-from ..database import init_db
-from .github_webhook import router as github_router
+# Add the project root to sys.path when running directly
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-# Get logger
-logger = logging.getLogger(__name__)
+# Import project modules after path setup
+from src.utils.config import get_settings
+from src.database import init_db
+from src.api.github_webhook import router as github_router
+from src.utils.logging import fastapi_logger
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+# Get settings
+settings = get_settings()
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="Docpilot API",
+    description="API for Docpilot, an AI-powered documentation assistant",
+    version="0.1.0"
 )
-logger = logging.getLogger("fastapi")
+
+# Configure Logfire for FastAPI
+logger = fastapi_logger(app)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
-    settings = get_settings()
     logger.info(
         "DocPilot API starting up",
         extra={
@@ -40,19 +48,13 @@ async def lifespan(app: FastAPI):
     )
     
     # Initialize the database
-    logger.info("Initializing database")
     init_db()
     
     yield
     logger.info("DocPilot API shutting down")
 
-# Initialize the FastAPI application
-app = FastAPI(
-    title="Docpilot API",
-    description="API for Docpilot, an AI-powered documentation assistant",
-    version="0.1.0",
-    lifespan=lifespan
-)
+# Assign lifespan to the app after logger is initialized
+app.router.lifespan_context = lifespan
 
 # Configure CORS
 app.add_middleware(
@@ -66,25 +68,19 @@ app.add_middleware(
 # Include routers
 app.include_router(github_router)
 
-# Instrument FastAPI with Logfire if available
-try:
-    logfire.instrument_fastapi(app)
-except (ImportError, AttributeError):
-    logger.warning("Logfire FastAPI instrumentation not available")
-
 @app.get("/")
 async def root():
     """Root endpoint returning basic API information"""
+    logger.info("Root endpoint requested")
     return {
         "name": "Docpilot API",
         "version": "0.1.0",
-        "description": "AI-powered documentation assistant"
+        "description": "AI-powered documentation assistant tool."
     }
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    settings = get_settings()
     logger.debug(
         "Health check requested",
         extra={"environment": settings.app_env}
@@ -94,7 +90,7 @@ async def health_check():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Global exception handler for unhandled exceptions"""
-    logger.exception(f"Unhandled exception: {str(exc)}")
+    logger.exception(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={
@@ -104,19 +100,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-def create_app() -> FastAPI:
-    """
-    Create and configure the FastAPI application.
-    
-    Can be used for testing or when more setup is needed before returning the app.
-    """
-    # Initialize additional resources or configurations if needed
-    settings = get_settings()
-    
-    # Log configuration details
-    logger.info(f"Starting Docpilot API in {settings.app_env} environment")
-    
-    return app
-
 if __name__ == "__main__":
-    uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True) 
+    if settings.app_env == "development":
+        uvicorn.run("src.api.app:app", host="0.0.0.0", port=8000, reload=True)
+    else:
+        uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -11,12 +11,13 @@ import os
 import re
 import json
 import fnmatch
-import logging
 from collections import defaultdict, Counter
 from typing import List, Dict, Any, Set, Tuple
 
+from .logging import core_logger  # Import core_logger
+
 # Setting up logging
-logger = logging.getLogger(__name__)
+logger = core_logger()
 
 class RepoScanner:
     """
@@ -114,7 +115,7 @@ class RepoScanner:
                 
                 logger.debug(f"Loaded gitignore from {gitignore_path}")
             except Exception as e:
-                logger.warning(f"Failed to parse .gitignore: {str(e)}")
+                logger.warning(f"Failed to parse .gitignore: {str(e)}", exc_info=True)
                 self.gitignore_spec = None
                 self.gitignore_patterns = []
     
@@ -159,7 +160,7 @@ class RepoScanner:
             return all_files
             
         except Exception as e:
-            logger.error(f"Error scanning repository: {str(e)}")
+            logger.error(f"Error scanning repository: {str(e)}", exc_info=True)
             return []
     
     def _should_include_file(self, file_path: str) -> bool:
@@ -519,19 +520,26 @@ class RepoScanner:
                     tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence * 0.8)
     
     def _analyze_docker_compose(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze docker-compose.yml for service technologies"""
-        service_tech_map = {
-            "postgres": ("postgresql", "database", 0.9),
-            "mysql": ("mysql", "database", 0.9),
-            "redis": ("redis", "database", 0.9),
-            "mongo": ("mongodb", "database", 0.9),
-            "elasticsearch": ("elasticsearch", "database", 0.8),
-        }
-        
-        # Check for services
-        for service, (tech, category, confidence) in service_tech_map.items():
-            if f"image: {service}" in content:
-                tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
+        """Analyze docker-compose.yml content"""
+        try:
+            import yaml
+            data = yaml.safe_load(content)
+            service_tech_map = {
+                "postgres": ("postgresql", "database", 0.9),
+                "mysql": ("mysql", "database", 0.9),
+                "redis": ("redis", "database", 0.9),
+                "mongo": ("mongodb", "database", 0.9),
+                "elasticsearch": ("elasticsearch", "database", 0.8),
+            }
+            
+            # Check for services
+            for service, (tech, category, confidence) in service_tech_map.items():
+                if f"image: {service}" in content:
+                    tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
+        except ImportError:
+            logger.warning("PyYAML not installed, skipping docker-compose analysis")
+        except Exception as e:
+            logger.warning(f"Error parsing docker-compose.yml: {str(e)}", exc_info=True)
     
     def create_directory_tree(self) -> Dict[str, Any]:
         """
@@ -545,25 +553,30 @@ class RepoScanner:
         # Create a tree structure
         tree = {}
         
-        for file_path in files:
-            parts = file_path.split('/')
-            current = tree
+        try:
+            for file_path in files:
+                parts = file_path.split('/')
+                current = tree
+                
+                # Build the tree structure
+                for i, part in enumerate(parts):
+                    if i == len(parts) - 1:  # This is a file
+                        if "files" not in current:
+                            current["files"] = []
+                        current["files"].append(part)
+                    else:  # This is a directory
+                        if "dirs" not in current:
+                            current["dirs"] = {}
+                        if part not in current["dirs"]:
+                            current["dirs"][part] = {}
+                        current = current["dirs"][part]
             
-            # Build the tree structure
-            for i, part in enumerate(parts):
-                if i == len(parts) - 1:  # This is a file
-                    if "files" not in current:
-                        current["files"] = []
-                    current["files"].append(part)
-                else:  # This is a directory
-                    if "dirs" not in current:
-                        current["dirs"] = {}
-                    if part not in current["dirs"]:
-                        current["dirs"][part] = {}
-                    current = current["dirs"][part]
-        
-        # Sort the tree
-        return self._sort_tree(tree)
+            logger.debug(f"Found {len(files)} files in repository")
+            return self._sort_tree(tree)
+            
+        except Exception as e:
+            logger.error(f"Error creating directory tree: {str(e)}", exc_info=True)
+            return self._sort_tree(tree)
     
     def create_markdown_tree(self) -> str:
         """

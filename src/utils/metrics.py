@@ -9,6 +9,10 @@ for Large Language Model interactions.
 from typing import Any
 from pydantic import BaseModel, Field
 
+from .logging import core_logger  # Import core_logger
+
+logger = core_logger()
+
 class ModelCosts(BaseModel):
     """Defines cost structure for different LLM models"""
     input_cost_per_token: float = Field(default=0.0, description="Cost per input token")
@@ -191,6 +195,9 @@ def extract_usage_from_result(result: Any, model_name: str = "default") -> Usage
                 usage.cost = 0.0
     
     except Exception as e:
+        # Log the error for debugging
+        logger.warning(f"Error extracting usage from result: {str(e)}", exc_info=True)
+        # Return a default Usage object indicating the error occurred
         return Usage(prompt_tokens=0,
                      completion_tokens=0,
                      total_tokens=0,

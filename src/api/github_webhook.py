@@ -6,17 +6,20 @@ API endpoints for handling GitHub webhook events.
 """
 
 import json
-import logging
-from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Request, Response, HTTPException, Header, Depends, BackgroundTasks
+from typing import Optional
+
+from fastapi import APIRouter, Request, HTTPException, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..github.webhook_handler import WebhookHandler
 from ..github.webhook_verification import verify_webhook_signature, extract_webhook_metadata
-from ..utils.config import get_settings
-from ..utils.logging import logger
+
+from ..utils.logging import core_logger
+
+# Initialize logger
+logger = core_logger()
 
 # -----------------------------------------------------------------------------
 # Router and Handler Setup
@@ -80,8 +83,8 @@ async def github_webhook(
     # Parse the JSON payload
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON payload")
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON payload", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
     # Extract metadata from request
@@ -144,7 +147,7 @@ async def update_docs(
     try:
         data = await request.json()
     except Exception as e:
-        logger.error(f"Error parsing request payload: {str(e)}")
+        logger.error(f"Error parsing request payload: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
         
     # Extract parameters
@@ -201,7 +204,7 @@ async def process_manual_update(
         
         logger.info(f"Completed manual update for {repo_url}")
     except Exception as e:
-        logger.exception(f"Error processing manual update: {str(e)}")
+        logger.exception(f"Error processing manual update: {str(e)}", exc_info=True)
 
 # -----------------------------------------------------------------------------
 # GitHub App Installation and OAuth Callbacks
