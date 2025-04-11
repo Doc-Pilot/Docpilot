@@ -90,338 +90,140 @@ def scan_repository(repo_path: str,
 
 def get_tech_stack(repo_path: str) -> Dict[str, Any]:
     """
-    Get the technology stack used in the repository.
+    Detect the technology stack, including specific API frameworks, used in the repository.
+    This function utilizes the RepoScanner's enhanced framework detection capabilities.
     
     Args:
         repo_path: Path to the repository
         
     Returns:
-        Dictionary with detected technologies by category
+        Dictionary with detected technologies, including a specific 'api_frameworks' key.
     """
     try:
+        # Normalize path
+        repo_path = os.path.abspath(repo_path)
+        if not os.path.exists(repo_path):
+            return {
+                "success": False,
+                "message": f"Repository path does not exist: {repo_path}",
+                "tech_stack": {}
+            }
+            
         scanner = RepoScanner(repo_path)
-        tech_stack = scanner.detect_frameworks()
+        tech_stack, api_frameworks = scanner.detect_frameworks()
         
         # Convert sets to lists for JSON serialization
         formatted_tech = {}
         for category, techs in tech_stack.items():
             formatted_tech[category] = sorted(list(techs))
+            
+        # Add the specifically identified API frameworks
+        formatted_tech["api_frameworks"] = sorted(list(api_frameworks))
         
+        # Determine primary API framework if possible
+        primary_api_framework = None
+        if api_frameworks:
+            # Simple heuristic: Prefer common Python/JS frameworks if multiple detected
+            preferred_order = ["fastapi", "flask", "django", "express", "nestjs"]
+            for fw in preferred_order:
+                if fw in api_frameworks:
+                    primary_api_framework = fw
+                    break
+            if not primary_api_framework:
+                primary_api_framework = sorted(list(api_frameworks))[0] # Fallback to alphabetical
+
         return {
             "success": True,
             "message": "Technology stack detection completed",
-            "tech_stack": formatted_tech
+            "tech_stack": formatted_tech,
+            "primary_api_framework": primary_api_framework
         }
     except Exception as e:
         logger.error(f"Error detecting technologies: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Error detecting technologies: {str(e)}",
-            "technologies": {}
+            "tech_stack": {}
         }
 
 def identify_api_components(repo_path: str) -> Dict[str, Any]:
     """
-    Identify API components in a repository for focused documentation.
-    
-    This function detects:
-    1. API directories and modules
-    2. Router/endpoint definition files
-    3. API controller/handler files
-    4. Schema/model definition files
-    5. Main application entry points
-    
-    Focus is on API components that require documentation for developers
-    to efficiently integrate with and understand the API.
+    Identify API components in a repository using framework-specific patterns.
+    This tool leverages the enhanced RepoScanner.identify_api_components method.
     
     Args:
         repo_path: Path to the repository
         
     Returns:
-        Dictionary with API components categorized by type
+        Dictionary with categorized API component file paths.
     """
     try:
         # Initialize scanner
-        scanner = RepoScanner(repo_path)
-        
-        # Get all files
-        files = scanner.scan_files()
-        
-        # Get language analysis to determine primary language
-        languages, extensions = scanner.analyze_languages(files)
-        primary_language = max(languages.items(), key=lambda x: x[1])[0] if languages else "Unknown"
-        
-        # Common API file patterns across languages
-        api_components = {
-            "api_directories": [],
-            "entry_points": [],
-            "routers": [],
-            "handlers": [],
-            "schemas": [],
-            "config": []
-        }
-        
-        # Detect API directories
-        api_dir_patterns = [
-            "/api/", "apis/", "/endpoints/", "/routes/", 
-            "/controllers/", "/views/", "/handlers/"
-        ]
-        
-        # Special case patterns by language
-        lang_specific_patterns = {
-            "Python": {
-                "entry_points": ["app.py", "main.py", "server.py", "api.py", "application.py"],
-                "router_patterns": ["router", "routes", "urls.py", "endpoints"],
-                "schema_patterns": ["schema", "model", "dto", "types"],
-                "file_extensions": [".py"]
-            },
-            "JavaScript": {
-                "entry_points": ["app.js", "server.js", "index.js", "api.js", "main.js"],
-                "router_patterns": ["router", "routes", "controller", "api.js"],
-                "schema_patterns": ["schema", "model", "type", "interface", "dto"],
-                "file_extensions": [".js", ".ts", ".jsx", ".tsx"]
-            },
-            "TypeScript": {
-                "entry_points": ["app.ts", "server.ts", "index.ts", "api.ts", "main.ts"],
-                "router_patterns": ["router", "routes", "controller", "api.ts"],
-                "schema_patterns": ["schema", "model", "type", "interface", "dto"],
-                "file_extensions": [".ts", ".tsx"]
-            },
-            "Java": {
-                "entry_points": ["Application.java", "Main.java", "ApiApplication.java"],
-                "router_patterns": ["Controller", "Resource", "Endpoint", "Route"],
-                "schema_patterns": ["DTO", "Model", "Entity", "Schema"],
-                "file_extensions": [".java"]
-            },
-            "Ruby": {
-                "entry_points": ["application.rb", "api.rb", "server.rb"],
-                "router_patterns": ["routes", "controller"],
-                "schema_patterns": ["model", "schema"],
-                "file_extensions": [".rb"]
-            },
-            "Go": {
-                "entry_points": ["main.go", "server.go", "api.go", "app.go"],
-                "router_patterns": ["handler", "controller", "route"],
-                "schema_patterns": ["model", "schema", "type", "struct"],
-                "file_extensions": [".go"]
-            },
-            "PHP": {
-                "entry_points": ["index.php", "api.php", "app.php"],
-                "router_patterns": ["controller", "route", "api"],
-                "schema_patterns": ["model", "entity", "schema"],
-                "file_extensions": [".php"]
-            }
-        }
-        
-        # Framework-specific patterns (for improved precision)
-        framework_patterns = {
-            "fastapi": {
-                "entry_pattern": ["app = FastAPI()", "fastapi.FastAPI()", "from fastapi import", "import fastapi"],
-                "router_pattern": ["APIRouter", "@app.", "@router."],
-                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/api/"])
-            },
-            "flask": {
-                "entry_pattern": ["Flask(__name__", "from flask import", "import flask"],
-                "router_pattern": ["@app.route", "flask.Blueprint"],
-                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/views/"])
-            },
-            "express": {
-                "entry_pattern": ["express()", "require('express')", "import express"],
-                "router_pattern": ["router", "app.use", "app.get", "app.post"],
-                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["/routes/", "/controllers/"])
-            },
-            "django": {
-                "entry_pattern": ["Django", "urls.py"],
-                "router_pattern": ["urlpatterns", "path("],
-                "file_detection": lambda f: "urls.py" in f.lower() or "/views/" in f.lower()
-            },
-            "spring": {
-                "entry_pattern": ["@SpringBootApplication", "SpringApplication.run"],
-                "router_pattern": ["@RestController", "@Controller", "@RequestMapping"],
-                "file_detection": lambda f: any(pattern in f.lower() for pattern in ["controller", "resource"])
-            },
-        }
-        
-        # 1. First scan - Find API directories
-        api_directories = set()
-        for file in files:
-            for pattern in api_dir_patterns:
-                if pattern in file.lower():
-                    # Get the directory containing the pattern
-                    parts = file.split('/')
-                    dir_index = 0
-                    for i, part in enumerate(parts):
-                        if pattern.strip('/') in part.lower():
-                            dir_index = i
-                            break
-                    
-                    if dir_index > 0:
-                        api_dir = '/'.join(parts[:dir_index+1])
-                        api_directories.add(api_dir)
-        
-        api_components["api_directories"] = sorted(list(api_directories))
-        
-        # 2. Now process each file by category
-        for file in files:
-            file_lower = file.lower()
-            filename = os.path.basename(file_lower)
-            file_ext = os.path.splitext(file_lower)[1]
-            
-            # Check if file is in an API directory
-            in_api_dir = any(file.startswith(api_dir) for api_dir in api_directories)
-            
-            # Analyze file content for key patterns if needed
-            file_content = None
-            
-            # 2.1 API Entry points (main app files)
-            is_entry_point = False
-            
-            # Check filename-based patterns for entry points
-            for lang, patterns in lang_specific_patterns.items():
-                if any(filename == entry_file.lower() for entry_file in patterns["entry_points"]):
-                    is_entry_point = True
-                    break
-            
-            # If not identified by filename, check API directories for main file patterns
-            if not is_entry_point and in_api_dir:
-                # For files in API directories, check for main app patterns
-                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
-                       for ext in lang_patterns["file_extensions"]):
-                    
-                    # Check for entry point patterns in content (lazy load content if needed)
-                    for framework, patterns in framework_patterns.items():
-                        if file_content is None:
-                            try:
-                                with open(os.path.join(repo_path, file), 'r', encoding='utf-8', errors='ignore') as f:
-                                    file_content = f.read()
-                            except Exception:
-                                file_content = ""  # Failed to read file
-                        
-                        if any(pattern in file_content for pattern in patterns["entry_pattern"]):
-                            is_entry_point = True
-                            break
-            
-            if is_entry_point:
-                api_components["entry_points"].append(file)
-            
-            # 2.2 Router files
-            is_router = False
-            
-            # Check filename-based patterns
-            if any(router_pattern in file_lower for lang_patterns in lang_specific_patterns.values() 
-                  for router_pattern in lang_patterns["router_patterns"]):
-                is_router = True
-            
-            # If not identified by filename, check content for router patterns
-            if not is_router and in_api_dir:
-                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
-                       for ext in lang_patterns["file_extensions"]):
-                    
-                    # Check for router patterns in content (lazy load content if needed)
-                    for framework, patterns in framework_patterns.items():
-                        if file_content is None:
-                            try:
-                                with open(os.path.join(repo_path, file), 'r', encoding='utf-8', errors='ignore') as f:
-                                    file_content = f.read()
-                            except Exception:
-                                file_content = ""  # Failed to read file
-                        
-                        if any(pattern in file_content for pattern in patterns["router_pattern"]):
-                            is_router = True
-                            break
-            
-            if is_router:
-                api_components["routers"].append(file)
-            
-            # 2.3 Handler/Controller files
-            # Files in api/controllers or similar directories
-            handler_patterns = ["/controllers/", "/handlers/", "service", "controller"]
-            if any(pattern in file_lower for pattern in handler_patterns) and not is_router and not is_entry_point:
-                if file_ext in [".py", ".js", ".ts", ".java", ".go", ".rb", ".php"]:
-                    api_components["handlers"].append(file)
-            
-            # 2.4 Schema/model files
-            schema_patterns = ["schema", "model", "entity", "dto", "type", "interface"]
-            if any(pattern in file_lower for pattern in schema_patterns):
-                if any(file_ext == ext for lang_patterns in lang_specific_patterns.values() 
-                       for ext in lang_patterns["file_extensions"]):
-                    api_components["schemas"].append(file)
-            
-            # 2.5 Config files specifically for APIs
-            if in_api_dir and any(pattern in file_lower for pattern in ["config", "settings"]):
-                api_components["config"].append(file)
-        
-        # Filter out empty categories
-        api_components = {k: v for k, v in api_components.items() if v}
-        
-        # Calculate stats
-        total_api_files = sum(len(files) for files in api_components.values())
-        
-        # Create result
-        result = {
-            "success": True,
-            "message": f"Identified {total_api_files} API-related files across {len(api_components)} categories",
-            "api_components": api_components,
-            "metrics": {
-                "total_api_files": total_api_files,
-                "api_directories": len(api_components.get("api_directories", [])),
-                "primary_language": primary_language
-            }
-        }
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error identifying API components: {str(e)}", exc_info=True)
-        return {
-            "success": False,
-            "message": f"Error identifying API components: {str(e)}",
-            "api_components": {}
-        }
-
-def generate_repo_tree(repo_path: str) -> Dict[str, Any]:
-    """
-    Generate a visually enhanced text-based directory tree for the repository.
-    
-    Features:
-    - Shows the repository structure with intuitive tree connectors (├─→, └─→)
-    - Includes file and directory icons for better visual distinction
-    - Starts with the repository name at the top
-    - Maintains proper vertical connection lines
-    
-    Args:
-        repo_path: Path to the repository
-        
-    Returns:
-        Dictionary containing the text tree representation
-    """
-    try:
-        # Normalize repository path
         repo_path = os.path.abspath(repo_path)
         if not os.path.exists(repo_path):
             return {
                 "success": False,
                 "message": f"Repository path does not exist: {repo_path}",
-                "text_tree": ""
+                "components": {}
             }
             
-        scanner = RepoScanner(
-            repo_path=repo_path,
-            use_gitignore=True
-        )
+        scanner = RepoScanner(repo_path)
         
-        # Generate text tree
-        text_tree = scanner.create_tree()
+        # Get API components using the dedicated RepoScanner method
+        api_components = scanner.identify_api_components() # This now returns Dict[str, List[str]]
         
         return {
             "success": True,
-            "message": "Repository tree generated successfully",
-            "text_tree": text_tree
+            "message": f"API component identification completed. Found {sum(len(v) for v in api_components.values())} component files.",
+            "components": api_components
+        }
+        
+    except Exception as e:
+        logger.error(f"Error identifying API components: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "message": f"Error identifying API components: {str(e)}",
+            "components": {}
+        }
+
+def generate_repo_tree(repo_path: str, 
+                         output_format: str = "markdown", 
+                         max_depth: int = 5) -> Dict[str, Any]:
+    """
+    Generate a tree representation of the repository structure.
+    
+    Args:
+        repo_path: Path to the repository
+        output_format: Format for the tree ('markdown' or 'text')
+        max_depth: Maximum depth to traverse for the tree
+        
+    Returns:
+        Dictionary containing the repository tree string
+    """
+    try:
+        repo_path = os.path.abspath(repo_path)
+        if not os.path.exists(repo_path):
+            return {"success": False, "error": f"Repository path not found: {repo_path}"}
+            
+        scanner = RepoScanner(repo_path)
+        
+        if output_format.lower() == "markdown":
+            tree_string = scanner.create_markdown_tree(max_depth=max_depth)
+        elif output_format.lower() == "text":
+            tree_string = scanner.create_tree(max_depth=max_depth)
+        else:
+            return {"success": False, "error": f"Unsupported format: {output_format}. Use 'markdown' or 'text'."}
+            
+        return {
+            "success": True,
+            "tree": tree_string,
+            "format": output_format,
+            "max_depth": max_depth
         }
         
     except Exception as e:
         logger.error(f"Error generating repository tree: {str(e)}", exc_info=True)
         return {
             "success": False,
-            "message": f"Error generating repository tree: {str(e)}",
-            "text_tree": ""
+            "error": f"Error generating repository tree: {str(e)}"
         }

@@ -213,6 +213,45 @@ def get_class_details(file_path: str, class_name: str) -> Dict[str, Any]:
     # Try to find the class in the module
     for cls in module.classes:
         if cls.name == class_name:
+            # Extract class body source code
+            class_body_source = ""
+            if module.source_code and cls.start_line and cls.end_line:
+                lines = module.source_code.splitlines()
+                # Adjust lines to be 0-indexed for slicing
+                start = cls.start_line - 1
+                end = cls.end_line
+                if 0 <= start < end <= len(lines):
+                     # Find the line where the class definition ends (contains ':')
+                     # We assume the body starts on the next line. This is a heuristic.
+                     # A more robust approach might involve AST directly if available.
+                     class_header_line_index = start
+                     for i in range(start, min(start + 5, end)): # Search nearby lines for ':'
+                         if ':' in lines[i]:
+                             class_header_line_index = i
+                             break
+                     
+                     body_start_line = class_header_line_index + 1
+                     
+                     # Slice the source code lines for the class body
+                     if body_start_line < end:
+                         class_body_lines = lines[body_start_line:end]
+                         # Dedent the body - important for ast.parse
+                         try:
+                             import textwrap
+                             class_body_source = textwrap.dedent("\\n".join(class_body_lines))
+                         except ImportError:
+                             # Fallback if textwrap isn't available (unlikely)
+                             # Naive dedent based on first line's indentation
+                             if class_body_lines:
+                                 first_line = class_body_lines[0]
+                                 indent = len(first_line) - len(first_line.lstrip())
+                                 class_body_source = "\\n".join(line[indent:] if line.startswith(' ' * indent) else line for line in class_body_lines)
+                             else:
+                                 class_body_source = ""
+                         except Exception as dedent_err:
+                             logger.warning(f"Could not dedent class body for {class_name} in {file_path}: {dedent_err}")
+                             class_body_source = "\\n".join(class_body_lines) # Use original if dedent fails
+
             result = {
                 "success": True,
                 "name": cls.name,
@@ -220,6 +259,7 @@ def get_class_details(file_path: str, class_name: str) -> Dict[str, Any]:
                 "start_line": cls.start_line,
                 "end_line": cls.end_line,
                 "language": module.language,
+                "body_source": class_body_source, # Add the source code
                 "methods": []
             }
             
