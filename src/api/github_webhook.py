@@ -6,6 +6,8 @@ API endpoints for handling GitHub webhook events.
 """
 
 import json
+import os
+import asyncio
 
 from typing import Optional
 
@@ -15,11 +17,12 @@ from pydantic import BaseModel
 
 from ..github.webhook_handler import WebhookHandler
 from ..github.webhook_verification import verify_webhook_signature, extract_webhook_metadata
-
+from ..utils.config import get_settings
 from ..utils.logging import core_logger
 
-# Initialize logger
+# Initialize logger and settings
 logger = core_logger()
+settings = get_settings()
 
 # -----------------------------------------------------------------------------
 # Router and Handler Setup
@@ -28,7 +31,7 @@ logger = core_logger()
 # Create an API router
 router = APIRouter(prefix="/api/github", tags=["github"])
 
-# Initialize the webhook handler
+# Initialize the webhook handler (to be potentially called by background tasks)
 webhook_handler = WebhookHandler()
 
 # -----------------------------------------------------------------------------
@@ -42,87 +45,166 @@ class WebhookResponse(BaseModel):
     error: Optional[str] = None
 
 # -----------------------------------------------------------------------------
-# Webhook Endpoints
+# Background Task Definition
+# -----------------------------------------------------------------------------
+
+async def process_doc_update_job(repo_info: dict, event_details: dict):
+    """
+    Background task to process the documentation update job.
+    This function will eventually trigger the ApiDocAgent.
+    """
+    logger.info(f"Starting background job for repo: {repo_info.get('full_name')}, event: {event_details.get('event_type')}")
+    
+    # Placeholder for the actual documentation generation pipeline
+    # This is where you would:
+    # 1. Clone/checkout the repository
+    # 2. Initialize ApiDocDependency with repo_path, changed_files, etc.
+    # 3. Instantiate and run the ApiDocAgent
+    # 4. Handle the ApiDocumentation result (e.g., commit changes)
+    
+    try:
+        # Simulate processing
+        logger.info(f"Simulating doc generation for {repo_info.get('full_name')}")
+        # In a real scenario, replace this with actual agent execution:
+        # agent = ApiDocAgent(...)
+        # deps = ApiDocDependency(repo_path=..., changed_files=event_details['changed_files'], ...)
+        # result = await agent.run("Generate API documentation based on recent changes.", deps=deps)
+        # handle_agent_result(result) # Function to commit/PR changes
+        
+        # Simulate success for now
+        await asyncio.sleep(5) # Simulate work
+        logger.info(f"Successfully processed background job for repo: {repo_info.get('full_name')}")
+
+    except Exception as e:
+        logger.exception(f"Error processing background job for {repo_info.get('full_name')}: {str(e)}")
+        # Add error handling/reporting logic here (e.g., update job status in DB)
+
+# -----------------------------------------------------------------------------
+# Webhook Endpoint
 # -----------------------------------------------------------------------------
 
 @router.post("/webhook")
 async def github_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: Optional[str] = Header(None),
     x_github_event: Optional[str] = Header(None),
     x_github_delivery: Optional[str] = Header(None),
-    x_hub_timestamp: Optional[str] = Header(None),
+    x_hub_timestamp: Optional[str] = Header(None), # Deprecated by GitHub but might exist
 ) -> JSONResponse:
     """
-    Handle GitHub webhook events.
+    Handle GitHub webhook events, verify signature, filter events, and enqueue background jobs.
     
     Args:
         request: The FastAPI request object
+        background_tasks: FastAPI background tasks manager
         x_hub_signature_256: The X-Hub-Signature-256 header (for webhook verification)
         x_github_event: The X-GitHub-Event header (event type)
         x_github_delivery: The X-GitHub-Delivery header (delivery ID)
-        x_hub_timestamp: The X-Hub-Timestamp header (optional timestamp)
+        x_hub_timestamp: Deprecated timestamp header
         
     Returns:
-        JSON response with result of webhook processing
+        JSON response indicating acceptance or error
     """
-    # Read the raw body
+    # --- 1. Signature Verification ---
     body = await request.body()
+    # The verify_webhook_signature function will load the secret from settings
     
-    # Verify the webhook signature
+    # Check if signature header is present (as verification function expects it)
+    if not x_hub_signature_256:
+        logger.warning(f"Missing X-Hub-Signature-256 header for delivery {x_github_delivery}. Denying webhook.")
+        raise HTTPException(status_code=400, detail="Missing X-Hub-Signature-256 header.")
+
     is_valid, message = verify_webhook_signature(
-        signature_header=x_hub_signature_256 or "",
+        signature_header=x_hub_signature_256, # Pass the validated header
         body=body,
-        request_timestamp=x_hub_timestamp
+        request_timestamp=x_hub_timestamp # Pass timestamp if available
     )
     
     if not is_valid:
-        logger.warning(f"Webhook verification failed: {message}")
-        raise HTTPException(status_code=401, detail=f"Webhook verification failed: {message}")
-    
-    # Parse the JSON payload
+        logger.warning(f"Webhook verification failed for delivery {x_github_delivery}: {message}")
+        raise HTTPException(status_code=401, detail=f"Webhook signature verification failed: {message}")
+
+    logger.info(f"Webhook signature verified successfully for delivery {x_github_delivery}")
+    # --- 2. Payload Parsing ---
     try:
         payload = json.loads(body)
     except json.JSONDecodeError as e:
-        logger.error("Invalid JSON payload", exc_info=True)
+        logger.error(f"Invalid JSON payload for delivery {x_github_delivery}", exc_info=True)
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
     
-    # Extract metadata from request
-    metadata = extract_webhook_metadata(
-        headers=dict(request.headers),
-        query_params=dict(request.query_params)
-    )
+    logger.info(f"Received valid GitHub webhook: {x_github_event} (ID: {x_github_delivery})")
+
+    # --- 3. Event Filtering (Focus on 'push' to target branches for MVP) ---
+    target_branches = settings.target_branches # e.g., ["main", "master"]
     
-    # Log the webhook event
-    logger.info(f"Received GitHub webhook: {x_github_event} (ID: {x_github_delivery})")
-    
-    # Process different event types
-    try:
-        # Handle the webhook event
-        result = await webhook_handler.handle_webhook(
-            event_type=x_github_event or "unknown",
-            payload=payload
-        )
+    if x_github_event == "push":
+        try:
+            ref = payload.get("ref", "") # e.g., "refs/heads/main"
+            branch = ref.split('/')[-1]
+            repo_info = payload.get("repository", {})
+            repo_full_name = repo_info.get("full_name", "unknown/repo")
+            
+            if branch in target_branches:
+                logger.info(f"Processing push event for '{repo_full_name}' on target branch '{branch}'")
+                
+                # Extract necessary details for the job
+                commits = payload.get("commits", [])
+                changed_files = set()
+                for commit in commits:
+                    changed_files.update(commit.get("added", []))
+                    changed_files.update(commit.get("modified", []))
+                    # We might only care about added/modified for doc generation
+                    # changed_files.update(commit.get("removed", [])) 
+
+                event_details = {
+                    "event_type": "push",
+                    "delivery_id": x_github_delivery,
+                    "branch": branch,
+                    "base_ref": payload.get("before"), # Commit SHA before push
+                    "head_ref": payload.get("after"),  # Commit SHA after push
+                    "changed_files": list(changed_files),
+                }
+                
+                # --- 4. Enqueue Background Task ---
+                background_tasks.add_task(
+                    process_doc_update_job,
+                    repo_info=repo_info, 
+                    event_details=event_details
+                )
+                
+                logger.info(f"Enqueued background job for '{repo_full_name}' push event.")
+                
+                return JSONResponse(
+                    status_code=202, # Accepted for processing
+                    content={
+                        "success": True, 
+                        "message": f"Accepted push event for '{repo_full_name}' on branch '{branch}'. Processing in background."
+                    }
+                )
+            else:
+                logger.info(f"Ignoring push event for '{repo_full_name}' on non-target branch '{branch}'")
+                return JSONResponse(status_code=200, content={"success": True, "message": "Event ignored (non-target branch)"})
+
+        except Exception as e:
+            logger.exception(f"Error processing push event payload for {x_github_delivery}", exc_info=True)
+            # Still return 200 OK to GitHub, but log the error
+            return JSONResponse(status_code=200, content={"success": False, "message": "Error processing push event payload"})
+
+    elif x_github_event == "ping":
+        logger.info(f"Received ping event from GitHub (ID: {x_github_delivery}). Setup successful.")
+        return JSONResponse(status_code=200, content={"success": True, "message": "Pong!"})
         
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": f"Successfully processed {x_github_event} event",
-                "metadata": metadata,
-                "result": result
-            }
-        )
-    except Exception as e:
-        logger.exception(f"Error processing webhook: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "message": f"Error processing webhook: {str(e)}",
-                "metadata": metadata
-            }
-        )
+    elif x_github_event == "installation":
+        # Handle installation event (Task #1) - Placeholder
+        action = payload.get("action")
+        logger.info(f"Received installation event (action: {action}) - Placeholder for Task #1")
+        # Add logic here to store/update installation details in DB
+        return JSONResponse(status_code=200, content={"success": True, "message": f"Installation event ({action}) received."})
+
+    else:
+        logger.info(f"Ignoring unsupported GitHub event: {x_github_event} (ID: {x_github_delivery})")
+        return JSONResponse(status_code=200, content={"success": True, "message": f"Event ignored (type: {x_github_event})"})
 
 # -----------------------------------------------------------------------------
 # Manual Documentation Update
