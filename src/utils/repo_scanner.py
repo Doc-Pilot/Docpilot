@@ -211,725 +211,958 @@ class RepoScanner:
         # Check include patterns
         return any(fnmatch.fnmatch(file_path, p) for p in self.include_patterns)
     
-    def detect_frameworks(self) -> Dict[str, Set[str]]:
+    def detect_frameworks(self) -> Tuple[Dict[str, Set[str]], Set[str]]:
         """
-        Detect frameworks and technologies used in the repository.
+        Detect frameworks and technologies, focusing on identifying API frameworks.
         
         Returns:
-            Dictionary of technology categories and detected technologies
+            Tuple[Dict[str, Set[str]], Set[str]]: 
+                - Dictionary of general technology categories and detected technologies.
+                - Set of specifically identified API frameworks (lowercase).
         """
-        # Get all files
         files = self.scan_files()
-        
-        # Get language statistics to verify technologies
         language_counts, _ = self.analyze_languages(files)
         languages_present = set(language_counts.keys())
         
-        # Define patterns for technology detection
         technology_patterns = {
+            # General categories
             "frontend": {
-                "react": ["react", "jsx", "react-dom", "react-router"],
-                "vue": ["vue", "vuex", "vue-router"],
-                "angular": ["angular", "@angular", "ng-"],
-                "svelte": ["svelte"],
-                "nextjs": ["next", "next.js"],
-                "tailwind": ["tailwind", "tailwindcss"],
-                "bootstrap": ["bootstrap"],
-                "material-ui": ["@mui", "material-ui"],
+                "React": ["react", "jsx", "react-dom", "react-router"],
+                "Vue": ["vue", "vuex", "vue-router"],
+                "Angular": ["angular", "@angular", "ng-"],
+                "Svelte": ["svelte"],
+                "Next.js": ["next", "next.js"],
+                "Tailwind CSS": ["tailwind", "tailwindcss"],
+                "Bootstrap": ["bootstrap"],
+                "Material UI": ["@mui", "material-ui"],
             },
             "backend": {
-                "express": ["express"],
-                "django": ["django", "wsgi"],
-                "flask": ["flask"],
-                "fastapi": ["fastapi"],
-                "spring": ["spring", "springframework"],
-                "nestjs": ["@nestjs", "nest"],
-                "graphql": ["graphql", "apollo"],
-                "rails": ["rails", "activerecord"],
+                "Node.js": ["node"], # Generic, will be refined by specific frameworks
+                "Python": ["python"], # Generic
+                "Java": ["java", "jvm"],
+                "Ruby": ["ruby"],
+                "Go": ["golang", "go"],
+                "PHP": ["php"]
             },
             "database": {
-                "mongodb": ["mongo", "mongodb"],
-                "postgresql": ["postgres", "postgresql", "psycopg2", "pg"],
-                "mysql": ["mysql"],
-                "sqlite": ["sqlite"],
-                "redis": ["redis"],
-                "prisma": ["prisma"],
-                "typeorm": ["typeorm"],
-                "sequelize": ["sequelize"],
+                "PostgreSQL": ["postgresql", "postgres", "psycopg2"],
+                "MySQL": ["mysql", "mysqlclient"],
+                "SQLite": ["sqlite"],
+                "MongoDB": ["mongodb", "pymongo"],
+                "Redis": ["redis", "pyredis"],
+                "SQLAlchemy": ["sqlalchemy"],
+                "Prisma": ["prisma"],
             },
             "testing": {
-                "jest": ["jest"],
-                "mocha": ["mocha"],
-                "pytest": ["pytest"],
-                "unittest": ["unittest"],
-                "jasmine": ["jasmine"],
-                "cypress": ["cypress"],
-                "selenium": ["selenium"],
+                "Pytest": ["pytest"],
+                "Jest": ["jest"],
+                "Mocha": ["mocha"],
+                "JUnit": ["junit"],
+                "Selenium": ["selenium"],
             },
             "devops": {
-                "docker": ["docker", "dockerfile"],
-                "kubernetes": ["kubernetes", "k8s"],
-                "ci-cd": ["ci", "cd", "ci/cd", "github/workflows", "github-actions"],
-                "aws": ["aws", "amazon web services", "boto3", "aws-sdk"],
-                "azure": ["azure", "@azure"],
-                "terraform": ["terraform", ".tf"],
+                "Docker": ["docker", "Dockerfile", "docker-compose"],
+                "Kubernetes": ["kubernetes", "kubectl"],
+                "Terraform": ["terraform", ".tf"],
+                "AWS": ["aws", "boto3"],
+                "GCP": ["gcp", "google-cloud"],
+                "Azure": ["azure"],
             },
+            # Specific API Framework patterns - used for direct identification
+            "api_frameworks": {
+                "FastAPI": ["fastapi"],
+                "Flask": ["flask"],
+                "Django REST framework": ["djangorestframework", "drf"],
+                "Express": ["express"],
+                "NestJS": ["@nestjs", "nest"],
+                "Spring Boot": ["spring-boot", "@SpringBootApplication"],
+                "Ruby on Rails": ["rails", "activerecord"], # Rails often implies API
+            }
         }
-        
-        # Initialize technologies with confidence scores (internal)
+
         tech_confidence = defaultdict(lambda: defaultdict(float))
-        
-        # Add detected languages with high confidence
-        for lang in languages_present:
-            if lang != "Other":
-                norm_lang = lang.lower()
-                if norm_lang in ["python", "javascript", "typescript", "ruby", "go", "rust", "java", "c#", "c++", "php"]:
-                    tech_confidence["languages"][norm_lang] = 1.0
-        
-        # Find and analyze dependency files for more accurate detection
-        dependency_files = []
-        
-        # Key dependency files by language/ecosystem
-        python_deps = ["requirements.txt", "setup.py", "Pipfile", "pyproject.toml"]
-        js_deps = ["package.json", "package-lock.json", "yarn.lock"]
-        ruby_deps = ["Gemfile", "Gemfile.lock"]
-        java_deps = ["pom.xml", "build.gradle"]
-        rust_deps = ["Cargo.toml"]
-        go_deps = ["go.mod", "go.sum"]
-        
-        # Infrastructure files
-        infra_files = ["Dockerfile", "docker-compose.yml", "docker-compose.yaml", ".github/workflows/"]
-        
-        for file in files:
-            filename = os.path.basename(file)
-            if filename in python_deps + js_deps + ruby_deps + java_deps + rust_deps + go_deps + infra_files:
-                dependency_files.append(file)
-                
-            # Check for GitHub workflows directory
-            if '.github/workflows' in file and (file.endswith('.yml') or file.endswith('.yaml')):
-                tech_confidence['devops']['ci-cd'] = 1.0
-        
-        # Analyze dependency files (most reliable signal)
-        for dep_file in dependency_files:
+        all_detected_tech = defaultdict(set)
+        detected_api_frameworks = set()
+
+        # 1. Scan specific configuration/dependency files
+        for file_path in files:
+            filename = os.path.basename(file_path).lower()
+            full_path = os.path.join(self.repo_path, file_path)
+            
             try:
-                file_path = os.path.join(self.repo_path, dep_file)
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    
-                    # Python dependencies
-                    if dep_file.endswith('requirements.txt'):
-                        self._analyze_python_requirements(content, tech_confidence)
-                    elif dep_file.endswith('setup.py'):
-                        self._analyze_setup_py(content, tech_confidence)
-                    elif dep_file.endswith('Pipfile') or dep_file.endswith('pyproject.toml'):
-                        self._analyze_python_deps(content, tech_confidence)
-                    
-                    # JavaScript/TypeScript dependencies
-                    elif dep_file.endswith('package.json'):
-                        self._analyze_package_json(content, tech_confidence)
-                    
-                    # Infrastructure
-                    elif dep_file.endswith('Dockerfile'):
-                        tech_confidence['devops']['docker'] = 1.0
-                    elif dep_file.endswith('docker-compose.yml') or dep_file.endswith('docker-compose.yaml'):
-                        tech_confidence['devops']['docker'] = 1.0
+                content = ""
+                # Python
+                if filename == "requirements.txt":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_python_requirements(content, tech_confidence)
+                elif filename == "pyproject.toml":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_pyproject_toml(content, tech_confidence)
+                elif filename == "setup.py" or filename == "setup.cfg":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_setup_py(content, tech_confidence)
+                # JavaScript
+                elif filename == "package.json":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_package_json(content, tech_confidence)
+                # Java
+                elif filename == "pom.xml":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_pom_xml(content, tech_confidence)
+                elif filename.endswith("build.gradle") or filename.endswith("build.gradle.kts"): 
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_gradle(content, tech_confidence)
+                # Ruby
+                elif filename == "gemfile":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_gemfile(content, tech_confidence)
+                # PHP
+                elif filename == "composer.json":
+                     with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                     self._analyze_composer_json(content, tech_confidence)
+                # Go
+                elif filename == "go.mod":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_go_mod(content, tech_confidence)
+                # DevOps
+                elif filename == "dockerfile":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    self._analyze_dockerfile(content, tech_confidence)
+                elif filename == "docker-compose.yml" or filename == "docker-compose.yaml":
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
                         self._analyze_docker_compose(content, tech_confidence)
-                    
             except Exception as e:
-                logger.debug(f"Error analyzing {dep_file}: {str(e)}")
-        
-        # Fallback to pattern matching for files with lower confidence
-        for file in files:
-            file_lower = file.lower()
+                logger.warning(f"Failed to read or analyze file {file_path}: {str(e)}")
+
+        # 2. Scan file contents for specific framework patterns (more expensive)
+        for file_path in files:
+            full_path = os.path.join(self.repo_path, file_path)
+            file_ext = os.path.splitext(file_path)[1].lower()
             
-            for category, techs in technology_patterns.items():
-                for tech, patterns in techs.items():
-                    for pattern in patterns:
-                        if pattern in file_lower or f"/{pattern}/" in file_lower:
-                            # Set confidence to 0.7 (lower than dependency files)
-                            tech_confidence[category][tech] = max(tech_confidence[category][tech], 0.7)
+            # Only scan relevant file types
+            scan_content = False
+            if file_ext in [".py", ".js", ".ts", ".java", ".rb", ".go", ".php"]:
+                scan_content = True
+                
+            if scan_content:
+                try:
+                    # Limit reading large files
+                    if os.path.getsize(full_path) > 1 * 1024 * 1024: # 1MB limit
+                        continue 
+                        
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        # Read only first N lines for performance
+                        content_sample = "".join(f.readline() for _ in range(200))
+                        
+                    # Apply content-based patterns
+                    for category, patterns in technology_patterns.items():
+                        for tech, keywords in patterns.items():
+                            if any(keyword.lower() in content_sample.lower() for keyword in keywords):
+                                tech_confidence[category][tech] += 0.1 # Lower confidence for content match
+
+                except Exception as e:
+                     logger.debug(f"Could not read file {file_path} for content analysis: {str(e)}")
+
+
+        # 3. Consolidate results based on confidence thresholds
+        confidence_threshold = 0.3 # Heuristic threshold
         
-        # Specific technology validations based on languages
-        if tech_confidence["languages"]["python"] > 0.5:
-            # Look for pytest.ini
-            if any(file.endswith('pytest.ini') for file in files):
-                tech_confidence["testing"]["pytest"] = 1.0
-            
-            # FastAPI detection
-            if tech_confidence["backend"]["fastapi"] < 0.5:
-                # Check main Python files for FastAPI imports
-                for file in files:
-                    if file.endswith('.py'):
-                        try:
-                            with open(os.path.join(self.repo_path, file), 'r', encoding='utf-8', errors='ignore') as f:
-                                content = f.read(1024)  # Read first KB to check imports
-                                if 'import fastapi' in content or 'from fastapi import' in content:
-                                    tech_confidence["backend"]["fastapi"] = 0.95
-                                    break
-                        except:
-                            pass
-        
-        # Make additional inferences based on detected technologies
-        if any(v > 0.5 for v in tech_confidence["frontend"].values()) and any(v > 0.5 for v in tech_confidence["backend"].values()):
-            tech_confidence["architecture"]["full-stack"] = 0.9
-        
-        if any(v > 0.5 for v in tech_confidence["database"].values()) and any(v > 0.5 for v in tech_confidence["backend"].values()):
-            tech_confidence["architecture"]["data-driven"] = 0.8
-        
-        if tech_confidence["languages"]["typescript"] > 0.5:
-            tech_confidence["practices"]["static-typing"] = 0.9
-        
-        # Convert confidence scores to final result (threshold > 0.5)
-        technologies = defaultdict(set)
         for category, techs in tech_confidence.items():
             for tech, confidence in techs.items():
-                if confidence > 0.5:  # Only include high confidence detections
-                    technologies[category].add(tech)
-                    
-        return technologies
-        
+                if confidence >= confidence_threshold:
+                    all_detected_tech[category].add(tech)
+                    # Specifically track identified API frameworks
+                    if category == "api_frameworks":
+                        detected_api_frameworks.add(tech.lower().replace(" ", "_").replace("rest_framework", "")) # Normalize name
+                        # Also add to general backend category if relevant
+                        if tech == "FastAPI": all_detected_tech["backend"].add("FastAPI")
+                        if tech == "Flask": all_detected_tech["backend"].add("Flask")
+                        if tech == "Django REST framework": all_detected_tech["backend"].add("Django")
+                        if tech == "Express": all_detected_tech["backend"].add("Express")
+                        if tech == "NestJS": all_detected_tech["backend"].add("NestJS")
+                        if tech == "Spring Boot": all_detected_tech["backend"].add("Spring Boot")
+                        if tech == "Ruby on Rails": all_detected_tech["backend"].add("Ruby on Rails")
+                            
+        # Remove the specific api_frameworks category from the general results
+        if "api_frameworks" in all_detected_tech:
+            del all_detected_tech["api_frameworks"]
+            
+        # Basic language check consistency (e.g., don't report Flask if no Python files)
+        if "Flask" in all_detected_tech.get("backend", set()) and "Python" not in languages_present:
+            all_detected_tech["backend"].discard("Flask")
+            detected_api_frameworks.discard("flask")
+        if "Express" in all_detected_tech.get("backend", set()) and not ("JavaScript" in languages_present or "TypeScript" in languages_present):
+             all_detected_tech["backend"].discard("Express")
+             detected_api_frameworks.discard("express")
+        # Add more checks as needed...
+            
+        logger.info(f"Detected technologies: {dict(all_detected_tech)}")
+        logger.info(f"Detected API Frameworks: {detected_api_frameworks}")
+        return dict(all_detected_tech), detected_api_frameworks
+
+    # Helper methods for analyzing specific dependency files
     def _analyze_python_requirements(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze Python requirements.txt file for dependencies"""
-        # Map from dependency name to technology and category
-        dep_to_tech = {
-            # Backend frameworks
-            "flask": ("flask", "backend", 1.0),
-            "fastapi": ("fastapi", "backend", 1.0),
-            "django": ("django", "backend", 1.0),
-            "starlette": ("fastapi", "backend", 0.8),  # FastAPI is built on Starlette
+        lines = content.splitlines()
+        for line in lines:
+            line = line.strip().split('#')[0] # Remove comments
+            if not line: continue
+            match = re.match(r"^([a-zA-Z0-9\-_]+)", line)
+            if match:
+                package = match.group(1).lower()
+                self._check_package_against_patterns(package, tech_confidence)
+
+    def _analyze_pyproject_toml(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        try:
+            import toml
+            data = toml.loads(content)
+            dependencies = data.get('tool', {}).get('poetry', {}).get('dependencies', {})
+            dev_dependencies = data.get('tool', {}).get('poetry', {}).get('dev-dependencies', {})
+            optional_dependencies = data.get('tool', {}).get('poetry', {}).get('extras', {})
             
-            # Databases
-            "psycopg2": ("postgresql", "database", 1.0),
-            "psycopg2-binary": ("postgresql", "database", 1.0),
-            "pymongo": ("mongodb", "database", 1.0),
-            "sqlalchemy": ("sql", "database", 0.8),
-            "redis": ("redis", "database", 1.0),
+            all_deps = {**dependencies, **dev_dependencies}
+            for group in optional_dependencies.values():
+                 if isinstance(group, list): 
+                     for item in group: all_deps[item] = '*' # Add extras packages
             
-            # Testing
-            "pytest": ("pytest", "testing", 1.0),
-            "selenium": ("selenium", "testing", 1.0),
+            # Also check [project] section for standard dependencies
+            project_deps = data.get('project', {}).get('dependencies', [])
+            project_optional_deps = data.get('project', {}).get('optional-dependencies', {})
             
-            # AWS
-            "boto3": ("aws", "devops", 1.0),
-            "aws-sdk": ("aws", "devops", 1.0),
-        }
-        
-        for line in content.splitlines():
-            line = line.strip()
-            if line and not line.startswith('#'):
-                # Extract package name (handles various formats like ==, >=, etc.)
-                package = line.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0].strip()
-                package = package.lower()
-                
-                # Check against known packages
-                if package in dep_to_tech:
-                    tech, category, confidence = dep_to_tech[package]
-                    tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
+            for dep in project_deps:
+                 match = re.match(r"^([a-zA-Z0-9\-_]+)", dep)
+                 if match: all_deps[match.group(1)] = '*'
+            
+            for group in project_optional_deps.values():
+                for dep in group:
+                     match = re.match(r"^([a-zA-Z0-9\-_]+)", dep)
+                     if match: all_deps[match.group(1)] = '*'
+            
+            for package in all_deps.keys():
+                self._check_package_against_patterns(package.lower(), tech_confidence)
+        except ImportError:
+            logger.warning("toml package not installed, skipping pyproject.toml analysis.")
+        except Exception as e:
+            logger.warning(f"Failed to parse pyproject.toml: {e}")
     
     def _analyze_setup_py(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze Python setup.py file for dependencies"""
-        # Look for install_requires section
-        if "install_requires" in content:
-            # Extract dependencies from install_requires
-            matches = re.findall(r'install_requires\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            if matches:
-                deps_str = matches[0]
-                # Extract quoted strings
-                deps = re.findall(r'[\'\"](.*?)[\'\"]', deps_str)
-                
-                # Process as if it were a requirements.txt file
-                self._analyze_python_requirements("\n".join(deps), tech_confidence)
-    
-    def _analyze_python_deps(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze Python dependency files like Pipfile or pyproject.toml"""
-        # Extract potential package names
-        packages = re.findall(r'[\'"]([a-zA-Z0-9_-]+)[\'"]', content)
-        packages.extend(re.findall(r'^\s*([a-zA-Z0-9_-]+)\s*=', content, re.MULTILINE))
-        
-        # Process as if it were a requirements.txt file
-        self._analyze_python_requirements("\n".join(packages), tech_confidence)
+        # Basic regex parsing, less reliable than AST but avoids execution
+        matches = re.findall(r"install_requires\s*=\s*\[([^\]]*)\]", content, re.MULTILINE) # Regex 1
+        deps = []
+        for match in matches:
+            deps.extend(re.findall(r"[\'\"]([a-zA-Z0-9\-_]+)[\'\"]", match)) # Regex 2
+
+        matches_extras = re.findall(r"extras_require\s*=\s*{[^}]*}", content, re.DOTALL) # Regex 3
+        for match in matches_extras:
+             deps.extend(re.findall(r"[\'\"]([a-zA-Z0-9\-_]+)[\'\"]", match)) # Regex 4 (same as 2)
+
+        for package in deps:
+             self._check_package_against_patterns(package.lower(), tech_confidence)
     
     def _analyze_package_json(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze Node.js package.json file for dependencies"""
         try:
             data = json.loads(content)
+            dependencies = data.get("dependencies", {})
+            dev_dependencies = data.get("devDependencies", {})
+            all_deps = {**dependencies, **dev_dependencies}
+            for package in all_deps.keys():
+                self._check_package_against_patterns(package.lower(), tech_confidence)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse package.json: {e}")
             
-            # Map from dependency name to technology and category
-            dep_to_tech = {
-                # Frontend
-                "react": ("react", "frontend", 1.0),
-                "vue": ("vue", "frontend", 1.0),
-                "next": ("nextjs", "frontend", 1.0),
-                "angular": ("angular", "frontend", 1.0),
-                "@angular/core": ("angular", "frontend", 1.0),
-                "svelte": ("svelte", "frontend", 1.0),
-                "tailwindcss": ("tailwind", "frontend", 1.0),
-                "bootstrap": ("bootstrap", "frontend", 1.0),
-                
-                # Backend
-                "express": ("express", "backend", 1.0),
-                "fastify": ("fastify", "backend", 1.0),
-                "koa": ("koa", "backend", 1.0),
-                "nest": ("nestjs", "backend", 1.0),
-                "@nestjs/core": ("nestjs", "backend", 1.0),
-                
-                # Databases
-                "mongodb": ("mongodb", "database", 1.0),
-                "mongoose": ("mongodb", "database", 0.9),
-                "pg": ("postgresql", "database", 1.0),
-                "mysql": ("mysql", "database", 1.0),
-                "mysql2": ("mysql", "database", 1.0),
-                "redis": ("redis", "database", 1.0),
-                "sqlite3": ("sqlite", "database", 1.0),
-                
-                # Testing
-                "jest": ("jest", "testing", 1.0),
-                "mocha": ("mocha", "testing", 1.0),
-                "chai": ("chai", "testing", 0.9),
-                "cypress": ("cypress", "testing", 1.0),
-                
-                # TypeScript
-                "typescript": ("typescript", "languages", 1.0),
-                
-                # AWS
-                "aws-sdk": ("aws", "devops", 1.0),
-            }
+    def _analyze_pom_xml(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        # Basic regex, misses versions and scopes but finds artifacts
+        matches = re.findall(r"<artifactId>([^<]+)</artifactId>", content)
+        for artifact in matches:
+             self._check_package_against_patterns(artifact.lower(), tech_confidence)
+             
+    def _analyze_gradle(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        # Very basic regex for common dependency declarations
+        # Corrected regex:
+        matches = re.findall(r"(?:implementation|compile|api)\s*[\(\'\"]\s*([a-zA-Z0-9._\-]+:[a-zA-Z0-9._\-]+)(?::[^\s\'\"\)]+)?\s*[\'\"\)]", content)
+        matches += re.findall(r"implementation\(libs\.([a-zA-Z0-9\-_\.]+)\)", content) # For version catalogs
+        for dep in matches:
+            artifact = dep.split(':')[1] if ':' in dep else dep
+            artifact = artifact.replace('.', '-') # Normalize catalog names
+            self._check_package_against_patterns(artifact.lower(), tech_confidence)
             
-            # Check for TypeScript
-            if "typescript" in data.get("devDependencies", {}) or "typescript" in data.get("dependencies", {}):
-                tech_confidence["languages"]["typescript"] = 1.0
-                tech_confidence["practices"]["static-typing"] = 0.9
-            
-            # Process dependencies
-            for section in ["dependencies", "devDependencies"]:
-                if section in data:
-                    for package in data[section].keys():
-                        # Check for exact matches
-                        if package in dep_to_tech:
-                            tech, category, confidence = dep_to_tech[package]
-                            tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
-                        
-                        # Check for partial matches (like @angular/*)
-                        for prefix, (tech, category, confidence) in dep_to_tech.items():
-                            if prefix.endswith('/') and package.startswith(prefix):
-                                tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
-        except:
-            # If JSON parsing fails, fall back to regex-based detection
-            for dep, (tech, category, confidence) in dep_to_tech.items():
-                if f'"{dep}"' in content or f"'{dep}'" in content:
-                    tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence * 0.8)
-    
-    def _analyze_docker_compose(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
-        """Analyze docker-compose.yml content"""
+    def _analyze_gemfile(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        matches = re.findall(r"gem\s+['\"]([a-zA-Z0-9\-_]+)['\"]", content)
+        for gem in matches:
+            self._check_package_against_patterns(gem.lower(), tech_confidence)
+    def _analyze_composer_json(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
         try:
-            import yaml
-            data = yaml.safe_load(content)
-            service_tech_map = {
-                "postgres": ("postgresql", "database", 0.9),
-                "mysql": ("mysql", "database", 0.9),
-                "redis": ("redis", "database", 0.9),
-                "mongo": ("mongodb", "database", 0.9),
-                "elasticsearch": ("elasticsearch", "database", 0.8),
+            data = json.loads(content)
+            dependencies = data.get("require", {})
+            dev_dependencies = data.get("require-dev", {})
+            all_deps = {**dependencies, **dev_dependencies}
+            for package in all_deps.keys():
+                package_name = package.split('/')[-1] # Get name after vendor
+                self._check_package_against_patterns(package_name.lower(), tech_confidence)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse composer.json: {e}")
+
+    def _analyze_go_mod(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        matches = re.findall(r"require\s+(?:\(|([^\s\n]+))", content)
+        deps = []
+        if matches:
+            if '(' in matches[0]: # Multi-line require block
+                block_content = re.search(r"require\s+\((.*?)\)", content, re.DOTALL)
+                if block_content:
+                    deps = re.findall(r"^\s*([^\s]+)", block_content.group(1), re.MULTILINE)
+            else: # Single line require
+                 deps = [matches[0]]
+                 
+        for dep in deps:
+            package_name = dep.split('/')[-1] # Heuristic to get package name
+            self._check_package_against_patterns(package_name.lower(), tech_confidence)
+
+    def _analyze_dockerfile(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        tech_confidence["devops"]["Docker"] += 0.5
+        if "python" in content.lower(): tech_confidence["backend"]["Python"] += 0.1
+        if "node" in content.lower(): tech_confidence["backend"]["Node.js"] += 0.1
+        if "java" in content.lower(): tech_confidence["backend"]["Java"] += 0.1
+        # Add more language/base image checks
+
+    def _analyze_docker_compose(self, content: str, tech_confidence: Dict[str, Dict[str, float]]) -> None:
+        tech_confidence["devops"]["Docker"] += 0.5
+        # Check service images for tech clues
+        if "postgres" in content.lower(): tech_confidence["database"]["PostgreSQL"] += 0.3
+        if "mysql" in content.lower(): tech_confidence["database"]["MySQL"] += 0.3
+        if "redis" in content.lower(): tech_confidence["database"]["Redis"] += 0.3
+        if "mongo" in content.lower(): tech_confidence["database"]["MongoDB"] += 0.3
+        if "python" in content.lower(): tech_confidence["backend"]["Python"] += 0.1
+        if "node" in content.lower(): tech_confidence["backend"]["Node.js"] += 0.1
+
+    def _check_package_against_patterns(self, package_name: str, tech_confidence: Dict[str, Dict[str, float]]):
+        """Helper to check a package name against defined technology patterns."""
+        package_name = package_name.lower().replace('_', '-') # Normalize
+        
+        technology_patterns = {
+            "frontend": {
+                "React": ["react", "react-dom"],
+                "Vue": ["vue", "vuex", "vue-router"],
+                "Angular": ["@angular/core", "@angular/common"],
+                "Svelte": ["svelte"],
+                "Next.js": ["next"],
+                "Tailwind CSS": ["tailwindcss"],
+                "Bootstrap": ["bootstrap", "react-bootstrap", "ng-bootstrap"],
+                "Material UI": ["@mui/material", "material-ui"],
+            },
+            "api_frameworks": {
+                "FastAPI": ["fastapi"],
+                "Flask": ["flask"],
+                "Django REST framework": ["djangorestframework"],
+                "Express": ["express"],
+                "NestJS": ["@nestjs/core", "@nestjs/common"],
+                "Spring Boot": ["spring-boot-starter"],
+                "Ruby on Rails": ["rails"],
+            },
+            "database": {
+                "SQLAlchemy": ["sqlalchemy"],
+                "Prisma": ["prisma"],
+                "PostgreSQL": ["psycopg2", "pg", "node-postgres"],
+                "MySQL": ["mysqlclient", "mysql2", "pymysql"],
+                "SQLite": ["sqlite3"],
+                "MongoDB": ["pymongo", "mongoose"],
+                "Redis": ["redis", "ioredis"],
+            },
+             "testing": {
+                "Pytest": ["pytest"],
+                "Jest": ["jest"],
+                "Mocha": ["mocha"],
+                "JUnit": ["junit"],
+                "Selenium": ["selenium"],
+            },
+            "devops": {
+                "AWS": ["boto3", "aws-sdk"],
+                "GCP": ["google-cloud"],
+                "Azure": ["azure"],
+                "Terraform": ["terraform"], # Less likely in deps, more file-based
             }
-            
-            # Check for services
-            for service, (tech, category, confidence) in service_tech_map.items():
-                if f"image: {service}" in content:
-                    tech_confidence[category][tech] = max(tech_confidence[category][tech], confidence)
-        except ImportError:
-            logger.warning("PyYAML not installed, skipping docker-compose analysis")
-        except Exception as e:
-            logger.warning(f"Error parsing docker-compose.yml: {str(e)}", exc_info=True)
+        }
+        
+        for category, patterns in technology_patterns.items():
+            for tech, keywords in patterns.items():
+                # Check for exact match or if package name starts with a keyword + hyphen
+                if package_name in keywords or any(package_name.startswith(kw + '-') for kw in keywords):
+                    tech_confidence[category][tech] += 1.0 # High confidence for dependency match
+                    break # Move to next category once matched
     
     def create_directory_tree(self) -> Dict[str, Any]:
         """
-        Create a hierarchical directory tree representation of the repository.
+        Create a hierarchical dictionary representing the directory structure.
         
         Returns:
-            Dictionary representing the repository directory structure
+            Nested dictionary representing the directory tree
         """
         files = self.scan_files()
-        
-        # Create a tree structure
         tree = {}
         
-        try:
-            for file_path in files:
-                parts = file_path.split('/')
-                current = tree
-                
-                # Build the tree structure
-                for i, part in enumerate(parts):
-                    if i == len(parts) - 1:  # This is a file
-                        if "files" not in current:
-                            current["files"] = []
-                        current["files"].append(part)
-                    else:  # This is a directory
-                        if "dirs" not in current:
-                            current["dirs"] = {}
-                        if part not in current["dirs"]:
-                            current["dirs"][part] = {}
-                        current = current["dirs"][part]
-            
-            logger.debug(f"Found {len(files)} files in repository")
-            return self._sort_tree(tree)
-            
-        except Exception as e:
-            logger.error(f"Error creating directory tree: {str(e)}", exc_info=True)
-            return self._sort_tree(tree)
-    
-    def create_markdown_tree(self) -> str:
-        """
-        Create a Markdown-formatted directory tree representation.
-        
-        Returns:
-            String containing the Markdown representation of the directory tree
-        """
-        files = self.scan_files()
-        
-        # Sort files to ensure consistent output
-        files.sort()
-        
-        # Build a tree structure
-        tree = {}
         for file_path in files:
             parts = file_path.split('/')
-            current = tree
-            for part in parts[:-1]:  # Process directories
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-                
-            # Add the file to the current directory
-            if "__files__" not in current:
-                current["__files__"] = []
-            current["__files__"].append(parts[-1])
-        
-        # Generate markdown
-        markdown_lines = ["# Repository Structure", ""]
-        
-        def traverse_tree(node, prefix="", depth=0):
-            # First process directories
-            dirs = sorted([k for k in node.keys() if k != "__files__"])
-            for i, dir_name in enumerate(dirs):
-                is_last = i == len(dirs) - 1 and "__files__" not in node
-                
-                if depth == 0:
-                    # Root level directories with simple formatting (no ## headers)
-                    markdown_lines.append(f"{dir_name}/")
-                    markdown_lines.append("") # Add empty line after root directory
-                    traverse_tree(node[dir_name], "", depth + 1)
-                    if i < len(dirs) - 1:
-                        markdown_lines.append("") # Add separator between root directories
+            node = tree
+            for i, part in enumerate(parts):
+                is_last = i == len(parts) - 1
+                if is_last:
+                    # File node
+                    node[part] = None 
                 else:
-                    # Print the directory with the appropriate prefix
-                    connector = "└── " if is_last else "├── "
-                    dir_line = f"{prefix}{connector}{dir_name}/"
-                    markdown_lines.append(dir_line)
-                    
-                    # Prepare the prefix for children
-                    new_prefix = prefix + ("    " if is_last else "│   ")
-                    traverse_tree(node[dir_name], new_prefix, depth + 1)
+                    # Directory node
+                    if part not in node:
+                        node[part] = {}
+                    # Ensure we don't overwrite a file with a directory if paths conflict
+                    if node[part] is None: 
+                        node[part] = {} 
+                    node = node[part]
+        
+        # Sort the tree alphabetically
+        return self._sort_tree(tree)
             
-            # Then process files
-            if "__files__" in node:
-                files = sorted(node["__files__"])
-                for i, file_name in enumerate(files):
-                    is_last = i == len(files) - 1
-                    connector = "└── " if is_last else "├── "
-                    file_line = f"{prefix}{connector}{file_name}"
-                    markdown_lines.append(file_line)
+    def create_markdown_tree(self, max_depth: int = 5) -> str:
+        """
+        Generate a Markdown representation of the directory tree.
         
-        traverse_tree(tree)
+        Args:
+            max_depth: Maximum depth to traverse.
         
+        Returns:
+            Markdown formatted string of the directory tree
+        """
+        tree_dict = self.create_directory_tree()
+        markdown_lines = [f"**{os.path.basename(self.repo_path)}/**"]
+
+        def traverse_tree(node, prefix="", depth=0):
+            if depth >= max_depth:
+                markdown_lines.append(f"{prefix}- ... (max depth reached)")
+                return
+                
+            # Sort items: directories first, then files
+            items = sorted(node.items(), key=lambda item: (isinstance(item[1], dict), item[0]))
+            
+            for i, (name, value) in enumerate(items):
+                connector = "    " * depth + "- "
+                new_prefix = prefix + "    " 
+                
+                if isinstance(value, dict):
+                    # Directory
+                    markdown_lines.append(f"{connector}**{name}/**")
+                    traverse_tree(value, new_prefix, depth + 1)
+                else:
+                    # File
+                    markdown_lines.append(f"{connector}{name}")
+                    
+        traverse_tree(tree_dict)
         return "\n".join(markdown_lines)
     
-    def create_tree(self) -> str:
+    def create_tree(self, max_depth: int = 5) -> str:
         """
-        Create a simple text-based directory tree representation with indentation.
+        Generate a visually enhanced text tree representation.
+        
+        Args:
+            max_depth: Maximum depth to traverse.
         
         Returns:
-            String containing the text representation of the directory tree
+            String containing the text tree representation
         """
-        files = self.scan_files()
-        
-        # Sort files to ensure consistent output
-        files.sort()
-        
-        # Build a tree structure
-        tree = {}
-        for file_path in files:
-            parts = file_path.split('/')
-            current = tree
-            for part in parts[:-1]:  # Process directories
-                if part not in current:
-                    current[part] = {}
-                current = current[part]
-                
-            # Add the file to the current directory
-            if "__files__" not in current:
-                current["__files__"] = []
-            current["__files__"].append(parts[-1])
-        
-        # Get repository name (basename of repo_path)
-        repo_name = os.path.basename(os.path.abspath(self.repo_path))
-        
-        # Generate text representation
-        lines = [f"📁 {repo_name}"]
+        tree_dict = self.create_directory_tree()
+        lines = [f"📁 {os.path.basename(self.repo_path)}/"]
         
         def traverse_tree(node, prefix="", is_last=True, indent_level=0):
-            # Process directories first
-            dirs = sorted([k for k in node.keys() if k != "__files__"])
-            
-            # Process files next
-            files = []
-            if "__files__" in node:
-                files = sorted(node["__files__"])
-            
-            # Process all items
-            total_items = len(dirs) + len(files)
-            processed = 0
-            
-            # First process directories
-            for dir_name in dirs:
-                processed += 1
-                is_last_item = (processed == total_items)
+            if indent_level >= max_depth:
+                lines.append(f"{prefix}{'└── ' if is_last else '├── '}... (max depth reached)")
+                return
                 
-                # Choose the correct prefix based on whether this is the last item
-                if is_last_item:
-                    conn = "└─→ "
-                    next_prefix = prefix + "    "
+            # Sort items: directories first, then files
+            items = sorted(node.items(), key=lambda item: (isinstance(item[1], dict), item[0]))
+            
+            count = len(items)
+            for i, (name, value) in enumerate(items):
+                current_is_last = i == count - 1
+                connector = "└── " if current_is_last else "├── "
+                line_prefix = prefix + connector
+                new_prefix = prefix + ("    " if current_is_last else "│   ")
+
+                if isinstance(value, dict):
+                    # Directory: Use folder icon
+                    lines.append(f"{line_prefix}📁 {name}/")
+                    traverse_tree(value, new_prefix, current_is_last, indent_level + 1)
                 else:
-                    conn = "├─→ "
-                    next_prefix = prefix + "│   "
-                
-                # Add directory with proper formatting
-                lines.append(f"{prefix}{conn}📁 {dir_name}/")
-                
-                # Process children with appropriate indentation
-                traverse_tree(node[dir_name], next_prefix, is_last_item)
-            
-            # Then process files
-            for i, file_name in enumerate(files):
-                is_last_item = (processed + i + 1 == total_items)
-                
-                # Choose connector based on position
-                conn = "└─→ " if is_last_item else "├─→ "
-                
-                # Add file with proper indentation and icon
-                ext = os.path.splitext(file_name)[1].lower()
-                
-                # Choose icon based on file extension
-                if ext in ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.cs', '.go', '.rb']:
-                    icon = "📜"  # Code file
-                elif ext in ['.md', '.txt', '.rst', '.adoc']:
-                    icon = "📄"  # Documentation
-                elif ext in ['.json', '.yaml', '.yml', '.toml', '.ini', '.cfg']:
-                    icon = "⚙️"   # Config file
-                elif ext in ['.jpg', '.png', '.gif', '.svg', '.bmp']:
-                    icon = "🖼️"   # Image
-                elif ext in ['.html', '.css', '.scss', '.sass']:
-                    icon = "🌐"   # Web file
-                else:
-                    icon = "📋"   # Generic file
-                
-                lines.append(f"{prefix}{conn}{icon} {file_name}")
-        
-        # Start traversal from root with no prefix
-        traverse_tree(tree)
-        
+                    # File: Use document icon
+                    lines.append(f"{line_prefix}📄 {name}")
+
+        traverse_tree(tree_dict)
         return "\n".join(lines)
     
     def _sort_tree(self, tree: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Sort the directory tree with directories first, followed by files, both alphabetically.
+        Recursively sort the directory tree dictionary.
+        Directories come before files, then alphabetically.
         
         Args:
-            tree: Tree structure to sort
+            tree: The directory tree dictionary
             
         Returns:
-            Sorted tree structure
+            Sorted directory tree dictionary
         """
-        result = {}
+        sorted_items = sorted(
+            tree.items(), 
+            key=lambda item: (isinstance(item[1], dict), item[0]) # Sort by type (dict first), then name
+        )
         
-        # Sort and add directories
-        if "dirs" in tree:
-            result["dirs"] = {}
-            for name in sorted(tree["dirs"].keys()):
-                result["dirs"][name] = self._sort_tree(tree["dirs"][name])
-        
-        # Sort and add files
-        if "files" in tree:
-            result["files"] = sorted(tree["files"])
-        
-        return result
+        sorted_tree = {}
+        for key, value in sorted_items:
+            if isinstance(value, dict):
+                sorted_tree[key] = self._sort_tree(value) # Recursively sort subdirectories
+            else:
+                sorted_tree[key] = value # Files remain as None
+                
+        return sorted_tree
     
     def get_file_extension_breakdown(self, file_list: List[str]) -> Dict[str, List[str]]:
         """
-        Group related files based on naming patterns and directory structure.
+        Group files by their extensions.
         
         Args:
             file_list: List of file paths
             
         Returns:
-            Dictionary of base names and related files
+            Dictionary where keys are extensions and values are lists of files
         """
-        related_files = defaultdict(list)
-        
-        # Group by common base name
+        extension_map = defaultdict(list)
         for file_path in file_list:
-            filename = os.path.basename(file_path)
-            name, ext = os.path.splitext(filename)
-            
-            # Handle special cases like index.js, README.md, etc.
-            if name.lower() in ["index", "readme", "main", "app"]:
-                dir_path = os.path.dirname(file_path)
-                base_dir = os.path.basename(dir_path) if dir_path else "root"
-                related_files[f"{base_dir}_{name}"].append(file_path)
+            _, ext = os.path.splitext(file_path)
+            if ext:
+                extension_map[ext.lower()].append(file_path)
             else:
-                # Handle file pairs like Component.js and Component.test.js
-                # Strip .test, .spec, etc., to group related files
-                base_name = re.sub(r'\.(test|spec|e2e|unit|integration|mock)$', '', name)
-                related_files[base_name].append(file_path)
+                # Handle files with no extension
+                extension_map["no_extension"].append(file_path)
         
-        return dict(related_files)
+        # Sort files within each extension category
+        for ext in extension_map:
+            extension_map[ext].sort()
+            
+        return dict(sorted(extension_map.items()))
     
     def identify_modules(self, files: List[str]) -> Dict[str, List[str]]:
         """
-        Identify logical modules or components in the repository.
+        Identify potential code modules based on directory structure.
         
         Args:
             files: List of file paths
             
         Returns:
-            Dictionary of module names and their files
+            Dictionary where keys are potential module paths and values are lists of files
         """
         modules = defaultdict(list)
         
-        # Common module indicators in path
-        module_indicators = [
-            "src",
-            "lib",
-            "app",
-            "components",
-            "modules",
-            "services",
-            "controllers",
-            "models",
-            "views",
-            "util",
-            "utils",
-            "helpers",
-            "api"
-        ]
-        
+        # Identify potential module roots (directories containing __init__.py or package.json)
+        module_roots = set()
         for file_path in files:
-            parts = file_path.split('/')
+            dirname = os.path.dirname(file_path)
+            filename = os.path.basename(file_path).lower()
             
-            # Detect modules based on directory structure
-            for i, part in enumerate(parts[:-1]):  # Skip the filename
-                if part.lower() in module_indicators:
-                    # If this is a module indicator and there's a next part (submodule)
-                    if i + 1 < len(parts) - 1:
-                        modules[parts[i+1]].append(file_path)
-                        break
-                    else:
-                        # No submodule, so this file belongs directly to the module
-                        modules[part].append(file_path)
-                        break
-            
-            # If no module was detected, put in the top-level directory
-            if file_path not in [f for module_files in modules.values() for f in module_files]:
-                if len(parts) > 1:
-                    modules[parts[0]].append(file_path)
-                else:
-                    modules["root"].append(file_path)
+            if filename == "__init__.py" or filename == "package.json":
+                # Consider the directory containing these files as a module root
+                module_roots.add(dirname)
+            elif filename == "setup.py" or filename == "pyproject.toml":
+                 # Consider the directory containing setup files as a potential root for the main package
+                 module_roots.add(dirname if dirname else '.') # Use '.' for root
         
-        return dict(modules)
-    
+        # Group files by the identified module roots
+        for file_path in files:
+            found_module = False
+            # Check from longest path to shortest to find the most specific module root
+            sorted_roots = sorted(list(module_roots), key=len, reverse=True)
+            
+            for root in sorted_roots:
+                # Handle root case '.' correctly
+                check_path = root + '/' if root else ''
+                if file_path.startswith(check_path) or root == '.':
+                    module_key = root if root else "<root>"
+                    modules[module_key].append(file_path)
+                    found_module = True
+                    break
+            
+            # If file doesn't belong to any identified module, add to a general category
+            if not found_module:
+                # Try to group by top-level directory for non-module files
+                top_level_dir = file_path.split('/')[0] if '/' in file_path else "<root>"
+                if top_level_dir != "<root>" and top_level_dir not in module_roots:
+                     modules[f"<other>/{top_level_dir}"].append(file_path)
+                else:
+                     modules["<other>"].append(file_path)
+
+        # Sort files within each module
+        for key in modules:
+            modules[key].sort()
+            
+        return dict(sorted(modules.items()))
+
     def analyze_languages(self, files: List[str]) -> Tuple[Dict[str, int], Dict[str, int]]:
         """
-        Analyze programming languages used in the repository.
+        Analyze language distribution based on file extensions.
         
         Args:
             files: List of file paths
             
         Returns:
-            Tuple of (language counts, extension counts)
+            Tuple[Dict[str, int], Dict[str, int]]: 
+                - Dictionary mapping language to file count
+                - Dictionary mapping file extension to file count
         """
         extension_map = {
-            ".py": "Python",
-            ".js": "JavaScript",
-            ".ts": "TypeScript",
-            ".jsx": "React/JavaScript",
-            ".tsx": "React/TypeScript",
-            ".java": "Java",
-            ".go": "Go",
-            ".rb": "Ruby",
-            ".rs": "Rust",
-            ".c": "C",
-            ".cpp": "C++",
+            # Code Languages
+            ".py": "Python", ".pyw": "Python",
+            ".js": "JavaScript", ".mjs": "JavaScript", ".cjs": "JavaScript",
+            ".ts": "TypeScript", ".tsx": "TypeScript",
+            ".java": "Java", ".jar": "Java",
             ".cs": "C#",
+            ".cpp": "C++", ".cxx": "C++", ".cc": "C++", ".hpp": "C++", ".hxx": "C++", ".h": "C/C++ Header",
+            ".c": "C",
+            ".rb": "Ruby",
             ".php": "PHP",
             ".swift": "Swift",
-            ".kt": "Kotlin",
+            ".kt": "Kotlin", ".kts": "Kotlin",
+            ".go": "Go",
+            ".rs": "Rust",
             ".scala": "Scala",
-            ".sh": "Shell",
-            ".html": "HTML",
+            ".pl": "Perl", ".pm": "Perl",
+            ".lua": "Lua",
+            ".r": "R",
+            ".sh": "Shell Script", ".bash": "Shell Script", ".zsh": "Shell Script",
+            ".ps1": "PowerShell",
+            ".dart": "Dart",
+            ".ex": "Elixir", ".exs": "Elixir",
+            ".erl": "Erlang", ".hrl": "Erlang",
+            ".hs": "Haskell", ".lhs": "Haskell",
+            ".clj": "Clojure", ".cljs": "Clojure", ".cljc": "Clojure",
+            ".groovy": "Groovy",
+            ".vb": "Visual Basic",
+            ".fs": "F#", ".fsx": "F#", ".fsi": "F#",
+            # Markup & Data
+            ".html": "HTML", ".htm": "HTML",
             ".css": "CSS",
-            ".scss": "SCSS",
-            ".sass": "SASS",
+            ".scss": "SCSS", ".sass": "SASS",
             ".less": "LESS",
-            ".sql": "SQL",
-            ".graphql": "GraphQL",
-            ".md": "Markdown",
             ".json": "JSON",
-            ".yaml": "YAML",
-            ".yml": "YAML",
+            ".xml": "XML",
+            ".yaml": "YAML", ".yml": "YAML",
             ".toml": "TOML",
+            ".md": "Markdown", ".markdown": "Markdown",
+            ".rst": "reStructuredText",
+            ".sql": "SQL",
+            ".csv": "CSV",
+            ".tsv": "TSV",
+            # Config & Build
+            ".ini": "INI Config",
+            ".conf": "Config",
+            ".cfg": "Config",
+            ".properties": "Properties Config",
+            "dockerfile": "Dockerfile",
+            "docker-compose.yml": "Docker Compose", "docker-compose.yaml": "Docker Compose",
+            ".tf": "Terraform", ".tfvars": "Terraform",
+            "makefile": "Makefile",
+            "cmakelists.txt": "CMake",
+            "pom.xml": "Maven POM",
+            "build.gradle": "Gradle Build", "build.gradle.kts": "Gradle Build",
+            "package.json": "NPM Config",
+            "composer.json": "Composer Config",
+            "gemfile": "Gemfile",
+            "requirements.txt": "Python Requirements",
+            "pyproject.toml": "Python Project Config",
+            "go.mod": "Go Modules", "go.sum": "Go Modules",
+            ".csproj": "C# Project", ".vbproj": "VB Project", ".fsproj": "F# Project", ".sln": "VS Solution",
+            # Other
+            ".ipynb": "Jupyter Notebook",
+            ".txt": "Text",
+            ".log": "Log",
+            ".pdf": "PDF",
+            ".png": "Image", ".jpg": "Image", ".jpeg": "Image", ".gif": "Image", ".svg": "Image", ".ico": "Image",
+            ".ttf": "Font", ".otf": "Font", ".woff": "Font", ".woff2": "Font",
+            ".zip": "Archive", ".gz": "Archive", ".tar": "Archive", ".rar": "Archive",
+            ".gitignore": "Git Ignore",
+            ".gitattributes": "Git Attributes",
+            "license": "License",
         }
         
         language_counts = Counter()
         extension_counts = Counter()
         
-        for file in files:
-            _, ext = os.path.splitext(file)
-            if ext:
-                ext = ext.lower()
-                extension_counts[ext] += 1
-                language = extension_map.get(ext, "Other")
+        for file_path in files:
+            filename = os.path.basename(file_path).lower()
+            _, ext = os.path.splitext(filename)
+
+            # Handle specific filenames first
+            if filename in extension_map:
+                language = extension_map[filename]
                 language_counts[language] += 1
+                extension_counts[filename] += 1 # Use filename as extension key
+            elif ext in extension_map:
+                language = extension_map[ext]
+                language_counts[language] += 1
+                extension_counts[ext] += 1
+            elif ext:
+                language_counts["Other"] += 1
+                extension_counts[ext] += 1
+            else:
+                 # Files with no extension
+                 language_counts["Other"] += 1
+                 extension_counts["no_extension"] += 1
+                 
+        # Sort by count descending
+        sorted_languages = dict(sorted(language_counts.items(), key=lambda item: item[1], reverse=True))
+        sorted_extensions = dict(sorted(extension_counts.items(), key=lambda item: item[1], reverse=True))
         
-        return dict(language_counts), dict(extension_counts)
+        return sorted_languages, sorted_extensions
     
     def analyze_repository(self) -> Dict[str, Any]:
         """
-        Analyze repository structure focused on documentation needs.
+        Perform a comprehensive analysis of the repository.
         
         Returns:
-            Dictionary containing analysis results
+            Dictionary containing files, languages, technologies, and structure
         """
+        logger.info(f"Starting repository analysis for {self.repo_path}")
         files = self.scan_files()
-        
         if not files:
-            logger.warning(f"No files found in repository scan for {self.repo_path}")
+            logger.warning("No files found to analyze.")
+            return {
+                "files": [],
+                "languages": {},
+                "technologies": {},
+                "structure": {},
+                "modules": {},
+                "file_count": 0,
+                "message": "No relevant files found in the repository."
+            }
             
-        # Perform analysis
-        technologies = self.detect_frameworks()
+        languages, extensions = self.analyze_languages(files)
+        technologies, api_frameworks = self.detect_frameworks()
         structure = self.create_directory_tree()
         modules = self.identify_modules(files)
-        languages, extensions = self.analyze_languages(files)
         
-        # Convert defaultdict to regular dict for JSON serialization
-        tech_dict = {}
-        for category, techs in technologies.items():
-            tech_dict[category] = list(techs)
-            
-        return {
+        analysis = {
             "files": files,
-            "technologies": tech_dict,
+            "languages": languages,
+            "extensions": extensions,
+            "technologies": technologies,
+            "api_frameworks": sorted(list(api_frameworks)), # Add identified API frameworks
             "structure": structure,
             "modules": modules,
-            "languages": languages,
-            "extensions": extensions
-        } 
+            "file_count": len(files),
+            "message": f"Analysis complete. Found {len(files)} files."
+        }
+        logger.info(f"Repository analysis complete. Found {len(files)} files.")
+        return analysis 
+
+    def identify_api_components(self) -> Dict[str, List[str]]:
+        """
+        Identify API components (entry points, routers, handlers, schemas) 
+        using framework-specific patterns and conventions.
+        
+        Returns:
+            Dictionary with categorized API component file paths.
+        """
+        files = self.scan_files()
+        _, detected_api_frameworks = self.detect_frameworks()
+        
+        # If multiple frameworks are detected, prioritize (e.g., based on common setups)
+        # For MVP, we might focus on the first detected or a specific one like FastAPI
+        primary_framework = None
+        if detected_api_frameworks:
+            preferred_order = ["fastapi", "flask", "django_rest_framework", "express", "nestjs", "spring_boot"]
+            for fw in preferred_order:
+                if fw in detected_api_frameworks:
+                    primary_framework = fw
+                    break
+            if not primary_framework:
+                primary_framework = list(detected_api_frameworks)[0] # Fallback
+        
+        logger.info(f"Identifying API components, primary framework detected: {primary_framework}")
+
+        # Define patterns (can be expanded significantly)
+        common_patterns = {
+            "entry_points": ["app.py", "main.py", "server.py", "api.py", "application.py", "index.js", "server.js", "main.ts", "Application.java"],
+            "routers": ["route", "router", "urls.py", "endpoint", "controller", "resource", "view"], # Keywords in path or filename
+            "schemas": ["schema", "model", "dto", "type", "interface", "entity"], # Keywords in path or filename
+            "handlers": ["handler", "service", "manager"], # Keywords in path or filename
+            "config": ["config", "setting", "env", "constant"],
+            "tests": ["test", "spec", "e2e"],
+        }
+
+        framework_specific_patterns = {
+            "fastapi": {
+                "routers": ["APIRouter", "@router.", "@app."], # Content patterns
+                "schemas": ["BaseModel", "pydantic"], # Content patterns
+            },
+            "flask": {
+                "routers": ["Blueprint", "@app.route", "@blueprint.route"],
+            },
+            "django_rest_framework": {
+                "routers": ["APIView", "ViewSet", "urls.py", "path(", "re_path("],
+                "schemas": ["Serializer"],
+            },
+            "express": {
+                "routers": ["express.Router()", "app.get(", "app.post(", "router.get(", "router.use("],
+            },
+            "nestjs": {
+                "routers": ["@Controller", "@Get", "@Post"],
+                "schemas": ["@InputType", "@ObjectType", "interface", "class "], # Less specific, relies on path
+                "handlers": ["@Injectable", "Service"] 
+            },
+            "spring_boot": {
+                "entry_points": ["@SpringBootApplication"],
+                "routers": ["@RestController", "@RequestMapping", "@GetMapping", "@PostMapping"],
+                "schemas": ["@Entity", "@Data", "DTO"], # Check filenames/paths more heavily
+                "handlers": ["@Service"],
+            },
+            # Add more frameworks as needed
+        }
+
+        api_components = defaultdict(list)
+        processed_files = set() # Avoid double-categorizing
+
+        # 1. Identify Entry Points (more reliable with content checks)
+        for file_path in files:
+            filename = os.path.basename(file_path).lower()
+            if filename in common_patterns["entry_points"]:
+                 api_components["entry_points"].append(file_path)
+                 processed_files.add(file_path)
+                 continue # Often entry points also match router patterns
+            
+            # Framework specific content check for entry points
+            if primary_framework in framework_specific_patterns:
+                 patterns = framework_specific_patterns[primary_framework]
+                 if "entry_points" in patterns:
+                     try:
+                         full_path = os.path.join(self.repo_path, file_path)
+                         if os.path.getsize(full_path) < 50 * 1024: # Limit size
+                            with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                 content_sample = f.read(5000) # Read start of file
+                            if any(p.lower() in content_sample.lower() for p in patterns["entry_points"]):
+                                 api_components["entry_points"].append(file_path)
+                                 processed_files.add(file_path)
+                                 continue
+                     except Exception:
+                         pass # Ignore read errors
+
+        # 2. Identify Routers/Controllers/Views (highest priority after entry points)
+        for file_path in files:
+            if file_path in processed_files: continue
+            
+            matched = False
+            # Check common path/filename patterns
+            if any(p in file_path.lower() for p in common_patterns["routers"]):
+                 api_components["routers"].append(file_path)
+                 processed_files.add(file_path)
+                 matched = True
+                 continue
+            
+            # Check framework-specific content patterns
+            if primary_framework in framework_specific_patterns:
+                 patterns = framework_specific_patterns[primary_framework]
+                 if "routers" in patterns:
+                     try:
+                         full_path = os.path.join(self.repo_path, file_path)
+                         # Only read content if file type is relevant
+                         if os.path.splitext(file_path)[1].lower() in [".py", ".js", ".ts", ".java"]:
+                            if os.path.getsize(full_path) < 100 * 1024: # Limit size
+                                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content_sample = f.read(10000) # Read start of file
+                                if any(p.lower() in content_sample.lower() for p in patterns["routers"]):
+                                    api_components["routers"].append(file_path)
+                                    processed_files.add(file_path)
+                                    matched = True
+                                    continue
+                     except Exception:
+                         pass 
+
+        # 3. Identify Schemas/Models/DTOs
+        for file_path in files:
+            if file_path in processed_files: continue
+            matched = False
+            # Check common path/filename patterns
+            if any(p in file_path.lower() for p in common_patterns["schemas"]):
+                 api_components["schemas"].append(file_path)
+                 processed_files.add(file_path)
+                 matched = True
+                 continue
+            
+            # Check framework-specific content patterns (less reliable for schemas, often just classes)
+            if primary_framework in framework_specific_patterns:
+                 patterns = framework_specific_patterns[primary_framework]
+                 if "schemas" in patterns:
+                     try:
+                         full_path = os.path.join(self.repo_path, file_path)
+                         if os.path.splitext(file_path)[1].lower() in [".py", ".js", ".ts", ".java"]:
+                             if os.path.getsize(full_path) < 50 * 1024:
+                                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content_sample = f.read(5000) 
+                                if any(p.lower() in content_sample.lower() for p in patterns["schemas"]):
+                                    api_components["schemas"].append(file_path)
+                                    processed_files.add(file_path)
+                                    matched = True
+                                    continue
+                     except Exception:
+                         pass
+
+        # 4. Identify Handlers/Services (often business logic called by routers)
+        for file_path in files:
+            if file_path in processed_files: continue
+            matched = False
+            if any(p in file_path.lower() for p in common_patterns["handlers"]):
+                 api_components["handlers"].append(file_path)
+                 processed_files.add(file_path)
+                 matched = True
+                 continue
+             # Optional: Add framework-specific content checks if useful
+            if primary_framework in framework_specific_patterns:
+                 patterns = framework_specific_patterns[primary_framework]
+                 if "handlers" in patterns:
+                    try:
+                         full_path = os.path.join(self.repo_path, file_path)
+                         if os.path.splitext(file_path)[1].lower() in [".py", ".js", ".ts", ".java"]:
+                             if os.path.getsize(full_path) < 100 * 1024:
+                                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content_sample = f.read(10000) 
+                                if any(p.lower() in content_sample.lower() for p in patterns["handlers"]):
+                                    api_components["handlers"].append(file_path)
+                                    processed_files.add(file_path)
+                                    matched = True
+                                    continue
+                    except Exception:
+                         pass
+
+        # 5. Identify Config files (potentially relevant for base URLs, auth)
+        for file_path in files:
+            if file_path in processed_files: continue
+            if any(p in file_path.lower() for p in common_patterns["config"]):
+                 api_components["config"].append(file_path)
+                 processed_files.add(file_path)
+                 continue
+                
+        # 6. Identify Test files (useful for understanding usage)
+        for file_path in files:
+            if file_path in processed_files: continue
+            if any(p in file_path.lower() for p in common_patterns["tests"]):
+                 api_components["tests"].append(file_path)
+                 processed_files.add(file_path)
+                 continue
+
+        # Sort results
+        for key in api_components:
+            api_components[key].sort()
+            
+        logger.info(f"Identified API components: { {k: len(v) for k, v in api_components.items()} }")
+        return dict(api_components) 
