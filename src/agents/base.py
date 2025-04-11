@@ -153,8 +153,12 @@ class BaseAgent(Generic[DepsT, ResultT]):
         return self._name
 
     def tool(self, func: Callable) -> Callable:
-        """Register a tool function with the agent"""
+        """Register a tool function with the agent that needs access to context"""
         return self.agent.tool(func)
+    
+    def tool_plain(self, func: Callable) -> Callable:
+        """Register a tool function with the agent that doesn't need access to context"""
+        return self.agent.tool_plain(func)
     
     def system_prompt_fn(self, func: Callable) -> Callable:
         """Register a dynamic system prompt function"""
