@@ -37,6 +37,7 @@ def _safe_literal_eval(node: ast.AST) -> Any:
 
 def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: str, repo_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Parse a single function definition for FastAPI route info."""
+    logger.debug(f"Parsing function '{node.name}' in {file_path}")
     route_decorator = None
     http_method = None
     route_path = None
@@ -47,34 +48,56 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
 
     # Find FastAPI route decorators (e.g., @app.get, @router.post)
     for decorator in node.decorator_list:
+        logger.debug(f"  Checking decorator: {ast.dump(decorator)}") # DEBUG LOG
         if isinstance(decorator, ast.Call):
-            decorator_name = ast.unparse(decorator.func).lower()
-            if any(pattern in decorator_name for pattern in [".get", ".post", ".put", ".delete", ".patch", ".options", ".head", ".trace"]):
+            decorator_func_unparsed = ast.unparse(decorator.func)
+            decorator_name = decorator_func_unparsed.lower()
+            logger.debug(f"    Decorator is ast.Call. Unparsed func: '{decorator_func_unparsed}', Lowercase: '{decorator_name}'") # DEBUG LOG
+            patterns = [".get", ".post", ".put", ".delete", ".patch", ".options", ".head", ".trace"]
+            match_found = any(pattern in decorator_name for pattern in patterns)
+            logger.debug(f"    Checking patterns {patterns} in '{decorator_name}'. Match found: {match_found}") # DEBUG LOG
+            if match_found:
                 method_match = re.search(r'\.(\w+)$', decorator_name)
                 if method_match:
                     http_method = method_match.group(1).upper()
                     route_decorator = decorator
+                    logger.debug(f"    Found route decorator '{decorator_name}' for function '{node.name}', Method: {http_method}") # DEBUG LOG
                     break
+                else:
+                    logger.debug(f"    Pattern matched but regex failed for '{decorator_name}'") # DEBUG LOG
         elif isinstance(decorator, ast.Attribute):
-             decorator_name = ast.unparse(decorator).lower()
-             if any(pattern in decorator_name for pattern in [".get", ".post", ".put", ".delete", ".patch", ".options", ".head", ".trace"]):
+             decorator_unparsed = ast.unparse(decorator)
+             decorator_name = decorator_unparsed.lower()
+             logger.debug(f"    Decorator is ast.Attribute. Unparsed: '{decorator_unparsed}', Lowercase: '{decorator_name}'") # DEBUG LOG
+             patterns = [".get", ".post", ".put", ".delete", ".patch", ".options", ".head", ".trace"]
+             match_found = any(pattern in decorator_name for pattern in patterns)
+             logger.debug(f"    Checking patterns {patterns} in '{decorator_name}'. Match found: {match_found}") # DEBUG LOG
+             if match_found:
                 method_match = re.search(r'\.(\w+)$', decorator_name)
                 if method_match:
                     http_method = method_match.group(1).upper()
                     route_decorator = decorator
+                    logger.debug(f"    Found route decorator '{decorator_name}' for function '{node.name}', Method: {http_method}") # DEBUG LOG
                     break
+                else:
+                    logger.debug(f"    Pattern matched but regex failed for '{decorator_name}'") # DEBUG LOG
+        else:
+             logger.debug(f"    Decorator is neither Call nor Attribute: {type(decorator)}") # DEBUG LOG
 
     if not route_decorator or not http_method:
+        logger.debug(f"No valid FastAPI route decorator found for function '{node.name}'")
         return None # Not a FastAPI route function
 
     # Extract info from the decorator
     if isinstance(route_decorator, ast.Call):
         if route_decorator.args:
             route_path = _safe_literal_eval(route_decorator.args[0])
+            logger.debug(f"Extracted route path: {route_path}")
 
         for keyword in route_decorator.keywords:
             if keyword.arg == 'response_model':
                 response_model_name = ast.unparse(keyword.value)
+                logger.debug(f"Extracted response_model: {response_model_name}")
             elif keyword.arg == 'status_code':
                 status_code_val = _safe_literal_eval(keyword.value)
                 if isinstance(status_code_val, int):
@@ -82,15 +105,19 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                 elif isinstance(status_code_val, str) and "status." in status_code_val:
                      code_part = status_code_val.split('_')[-1]
                      if code_part.isdigit(): status_code = int(code_part)
+                logger.debug(f"Extracted status_code: {status_code}")
             elif keyword.arg == 'tags' and isinstance(keyword.value, (ast.List, ast.Tuple)):
                 tags = _safe_literal_eval(keyword.value)
                 if not isinstance(tags, list):
                    tags = [ast.unparse(el) for el in keyword.value.elts]
+                logger.debug(f"Extracted tags: {tags}")
     elif route_path is None:
          logger.debug(f"Could not determine route path for {node.name} in {file_path} from decorator {ast.unparse(route_decorator)}")
          if node.name.startswith(('get_', 'create_', 'update_', 'delete_')):
              route_path = f"/{node.name.split('_', 1)[-1]}" # Basic guess
+             logger.debug(f"Guessed route path: {route_path}")
          else:
+             logger.warning(f"Failed to determine route path for '{node.name}'")
              return None
 
     # Extract info from the function definition
@@ -110,6 +137,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
     
     if not summary:
         summary = func_name # Fallback to function name if no docstring/summary line
+    logger.debug(f"Function '{node.name}': summary='{summary}'")
 
     start_line = node.lineno
 
@@ -122,6 +150,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
     for i, arg in enumerate(node.args.args):
         param_name = arg.arg
         if param_name in ('self', 'cls'): continue
+        logger.debug(f"Processing parameter '{param_name}'")
 
         param_type = "Any" # Default
         param_default = None
@@ -135,6 +164,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
             param_type_str = ast.unparse(arg.annotation)
             param_type = param_type_str # Store the raw annotation string
             annotation_node = arg.annotation
+            logger.debug(f"  Annotation found: {param_type_str}")
 
             # Handle Optional[Type] or Union[Type, None]
             if isinstance(annotation_node, ast.Subscript) and isinstance(annotation_node.value, ast.Name):
@@ -142,6 +172,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                      is_optional = True
                      inner_type_node = annotation_node.slice
                      effective_param_type = ast.unparse(inner_type_node)
+                     logger.debug(f"  Detected Optional, effective type: {effective_param_type}")
                  elif annotation_node.value.id == 'Union':
                      if isinstance(annotation_node.slice, ast.Tuple):
                          types_in_union = [ast.unparse(t) for t in annotation_node.slice.elts]
@@ -152,6 +183,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                                  effective_param_type = non_none_types[0]
                              else:
                                  effective_param_type = f"Union[{', '.join(non_none_types)}]"
+                             logger.debug(f"  Detected Union with None, effective type: {effective_param_type}")
                      else: # Single type in Union?
                          effective_param_type = ast.unparse(annotation_node.slice)
                  else:
@@ -188,6 +220,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                         param_source = marker_source_map[param_func_name]
                         is_request_body = (param_source == 'body')
                         found_param_marker = True
+                        logger.debug(f"  Found marker: {param_func_name}, source: {param_source}")
                         # Extract details from the call
                         for kw in check_node.keywords:
                             if kw.arg == 'description': 
@@ -198,6 +231,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                         # Default can also be the first positional arg
                         if not param_default and check_node.args:
                             param_default = _safe_literal_eval(check_node.args[0])
+                        logger.debug(f"  Marker details: default={param_default}, description='{marker_description}'")
                         break # Found marker
 
             # Extract default from function signature if not found elsewhere
@@ -206,19 +240,23 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
                 if arg_index_in_sig != -1 and arg_index_in_sig >= num_args - num_defaults:
                     default_index = arg_index_in_sig - (num_args - num_defaults)
                     param_default = _safe_literal_eval(node.args.defaults[default_index])
+                    logger.debug(f"  Default value from signature: {param_default}")
 
             is_required = param_default is None and not is_optional
+            logger.debug(f"  Parameter '{param_name}': type={effective_param_type}, required={is_required}, optional={is_optional}, source={param_source}")
 
             # Use the effective type (inner type of Optional/Union)
             # Ensure param_type holds the actual model name if it's a body
             model_name_for_body = effective_param_type if is_request_body else None
             if model_name_for_body:
                 request_model_name = model_name_for_body # CAPTURE request model name
+                logger.debug(f"  Identified request body model: {request_model_name}")
 
             param_description = param_docs.get(param_name, "") # Get description from parsed docstring
 
             # Prioritize marker description if available
             final_param_description = marker_description or param_description
+            logger.debug(f"  Final description: '{final_param_description}'")
 
             param_info = {
                 "name": param_name,
@@ -232,8 +270,10 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
 
             if is_request_body:
                  request_body_param_info = param_info # Store details, including type/model name
+                 logger.debug(f"  Stored request body info for '{param_name}'")
             else:
                  parameters.append(param_info)
+                 logger.debug(f"  Added parameter '{param_name}' to list")
 
     # Assemble Endpoint Data
     endpoint_dict = {
@@ -268,6 +308,7 @@ def parse_fastapi_function(node: ast.FunctionDef, file_path: str, source_code: s
             "schema_name": request_model_name # Store just the name
         }
 
+    logger.info(f"Successfully parsed endpoint '{func_name}' in {file_path}")
     return endpoint_dict
 
 
@@ -275,6 +316,7 @@ def parse_fastapi_endpoint(file_path: str, file_structure: Dict[str, Any], repo_
     """Parse FastAPI-specific endpoint definitions using AST."""
     endpoints = []
     full_path = os.path.join(repo_path, file_path) if repo_path and not os.path.isabs(file_path) else file_path
+    logger.info(f"Attempting to parse FastAPI endpoints in: {full_path}")
 
     try:
         with open(full_path, 'r', encoding='utf-8') as f:
@@ -293,6 +335,7 @@ def parse_fastapi_endpoint(file_path: str, file_structure: Dict[str, Any], repo_
             if endpoint_data:
                 endpoints.append(endpoint_data)
 
+    logger.info(f"Finished parsing FastAPI endpoints in {file_path}. Found {len(endpoints)} endpoints.")
     return endpoints
 
 def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -302,6 +345,7 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
     body_source = class_info.get("body_source", "")
     class_name = class_info.get("name", "UnknownClass")
     file_path = class_info.get("source_file", "unknown_file")
+    logger.debug(f"Parsing Pydantic model '{class_name}' in {file_path}")
 
     if not body_source:
         logger.warning(f"No body source found for Pydantic model {class_name} in {file_path}")
@@ -316,6 +360,7 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
         dummy_class_source = f"class DummyModel:\n{textwrap.indent(body_source or 'pass', '    ')}"
         tree = ast.parse(dummy_class_source)
         class_body_nodes = tree.body[0].body
+        logger.debug(f"Parsed AST for {class_name}")
 
         for node in class_body_nodes:
             field_name = None
@@ -350,12 +395,14 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
                                 req_val = _safe_literal_eval(kw.value)
                                 if req_val is True: is_required = True
                                 if req_val is False: is_required = False
+                                logger.debug(f"  Field '{field_name}': Found explicit required={req_val} in Field()")
                                 break
 
                         for kw in field_args.keywords:
                             if kw.arg == 'description':
                                 desc_val = _safe_literal_eval(kw.value)
                                 if isinstance(desc_val, str): description = desc_val
+                                logger.debug(f"  Field '{field_name}': Found description='{description}' in Field()")
                                 break
 
             elif isinstance(node, ast.Assign):
@@ -365,6 +412,7 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
                     default_value_repr = ast.unparse(node.value).strip()
 
             if field_name:
+                logger.debug(f"  Processing field: {field_name}, Type: {field_type_str}, Required: {is_required}, Default: {default_value_repr}")
                 field_details = {
                     "name": field_name,
                     "type": field_type_str,
@@ -378,6 +426,8 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
                 fields.append(field_details)
                 if is_required:
                     required.append(field_name) # Keep the separate list for OpenAPI compatibility if needed
+            else:
+                 logger.debug(f"  Skipping node in {class_name} body: {ast.dump(node)}")
 
     except SyntaxError as e:
         logger.error(f"AST Syntax Error parsing Pydantic model {class_name} in {file_path}: {e}\nSource:\n{dummy_class_source}")
@@ -386,6 +436,7 @@ def parse_pydantic_model(class_info: Dict[str, Any]) -> Dict[str, Any]:
         logger.exception(f"Unexpected error parsing Pydantic model {class_name} in {file_path}: {e}", exc_info=True)
         return {"fields": [], "required": []}
 
+    logger.info(f"Finished parsing Pydantic model '{class_name}'. Found {len(fields)} fields.")
     # Return list of fields instead of properties dict
     return {"fields": fields, "required": required} 
 
