@@ -1,60 +1,61 @@
 """
-Tools Module
-===========
+DocPilot Tools
+==============
 
-This module provides a collection of tools that can be used by LLM agents 
-to interact with code and documentation. Each tool is a standalone function
-that can be called directly or via an agent system.
-
-Categories:
-- Code Analysis: Tools for parsing and analyzing code structure
-- Documentation: Tools for generating and evaluating documentation
-- Repository: Tools for analyzing repository structure and APIs
+Collection of tools for code analysis, documentation handling, and repository interaction.
 """
 
-# Import all tools for direct access from tools module
+# Import tools from respective modules to make them available under tools.*
 from .code_tools import (
     get_code_structure,
-    parse_code_snippet,
     get_function_details,
     get_class_details,
-    get_supported_languages
+    # Commented out as it seems deprecated or less used
+    # find_relevant_code_snippets 
 )
-
 from .doc_tools import (
     scan_docs,
+    get_doc_content,
     find_docs_to_update,
     get_doc_update_suggestions,
-    get_doc_content,
-    get_doc_type,
 )
-
 from .repo_tools import (
     scan_repository,
-    generate_repo_tree,
     get_tech_stack,
-    identify_api_components
+    identify_api_components,
+    generate_repo_tree,
 )
 
-# Make all functions available at module level
+# Import the new API tools
+from .api_tools import (
+    detect_api_framework,
+    extract_api_endpoints,
+    extract_api_schemas,
+)
+
+# Define __all__ for explicit public interface
 __all__ = [
-    # Code analysis tools
+    # Code Tools
     "get_code_structure",
-    "parse_code_snippet",
     "get_function_details",
     "get_class_details",
-    "get_supported_languages",
-    
-    # Documentation tools
+    # Doc Tools
     "scan_docs",
+    "get_doc_content",
     "find_docs_to_update",
     "get_doc_update_suggestions",
-    "get_doc_content",
-    "get_doc_type",
-    
-    # Repository tools
+    # Repo Tools
     "scan_repository",
-    "generate_repo_tree",
     "get_tech_stack",
-    "identify_api_components"
-] 
+    "identify_api_components",
+    "generate_repo_tree",
+    # API Tools (New)
+    "detect_api_framework",
+    "extract_api_endpoints",
+    "extract_api_schemas",
+]
+
+# Optional: Logging configuration for the tools module if needed
+# from ..utils.logging import core_logger
+# logger = core_logger()
+# logger.debug("DocPilot tools module loaded.") 
