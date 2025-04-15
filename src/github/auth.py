@@ -18,7 +18,27 @@ settings = get_settings()
 
 # Configuration (Load securely from settings/environment variables)
 GITHUB_APP_ID = settings.github_app_id
-GITHUB_PRIVATE_KEY = settings.github_private_key
+GITHUB_PRIVATE_KEY_PATH = settings.github_private_key_path
+
+def _load_private_key() -> str | None:
+    """Loads the GitHub App private key from the path specified in settings."""
+    if not GITHUB_PRIVATE_KEY_PATH:
+        logger.error("GitHub Private Key path (GITHUB_PRIVATE_KEY_PATH) is not configured.")
+        return None
+    try:
+        with open(GITHUB_PRIVATE_KEY_PATH, 'r') as f:
+            private_key = f.read()
+            logger.info(f"Successfully loaded GitHub private key from {GITHUB_PRIVATE_KEY_PATH}")
+            return private_key
+    except FileNotFoundError:
+        logger.error(f"GitHub Private Key file not found at path: {GITHUB_PRIVATE_KEY_PATH}")
+        return None
+    except Exception as e:
+        logger.exception(f"Error reading GitHub private key from {GITHUB_PRIVATE_KEY_PATH}: {str(e)}")
+        return None
+
+# Load the key once on module load
+_GITHUB_PRIVATE_KEY_CONTENT = _load_private_key()
 
 # Constants
 GITHUB_API_BASE_URL = "https://api.github.com"
@@ -32,8 +52,9 @@ def generate_github_jwt() -> str | None:
     Returns:
         The generated JWT string, or None if configuration is missing or invalid.
     """
-    if not GITHUB_APP_ID or not GITHUB_PRIVATE_KEY:
-        logger.error("GitHub App ID or Private Key is missing in configuration.")
+    private_key = _GITHUB_PRIVATE_KEY_CONTENT # Use the loaded key content
+    if not GITHUB_APP_ID or not private_key:
+        logger.error("GitHub App ID is missing or Private Key could not be loaded.")
         return None
 
     try:
@@ -49,7 +70,7 @@ def generate_github_jwt() -> str | None:
         }
 
         # Generate JWT
-        jwt_token = jwt.encode(payload, GITHUB_PRIVATE_KEY, algorithm="RS256")
+        jwt_token = jwt.encode(payload, private_key, algorithm="RS256")
         logger.info(f"Successfully generated JWT for GitHub App ID {GITHUB_APP_ID}")
         return jwt_token
 
