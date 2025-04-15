@@ -10,6 +10,9 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from ..utils.logging import core_logger
+from ..database import get_session
+from ..models.installation import Installation
+from ..models.repository import Repository
 
 logger = core_logger()
 
@@ -24,7 +27,7 @@ class WebhookHandler:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the webhook handler"""
         self.config = config or {}
-        logger.info("Initialized webhook handler in test mode")
+        logger.info("Initialized webhook handler")
         
     async def handle_webhook(self, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -218,7 +221,7 @@ class WebhookHandler:
     
     async def handle_installation_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle an installation event.
+        Handle an installation or installation_repositories event and update the database.
         
         Args:
             payload: The webhook payload from GitHub
@@ -227,17 +230,200 @@ class WebhookHandler:
             Dictionary with handling results
         """
         action = payload.get("action", "")
-        installation_id = payload.get("installation", {}).get("id", "")
-        account = payload.get("installation", {}).get("account", {}).get("login", "")
+        event_type = payload.get("event_type", "installation") # Determine if 'installation' or 'installation_repositories'
+        installation_data = payload.get("installation")
         
-        # For testing, just log and return success
-        logger.info(f"Installation event handled: {account} {action} (ID: {installation_id})")
+        if not installation_data:
+            logger.warning("Installation event payload missing 'installation' data.")
+            return {
+                "success": False, 
+                "message": "Missing installation data in payload",
+                "event_type": event_type # Use determined event type
+            }
+            
+        github_id = installation_data.get("id")
+        account_data = installation_data.get("account", {})
+        account_id = account_data.get("id")
+        account_login = account_data.get("login")
+        account_type = account_data.get("type") # 'Organization' or 'User'
+        account_name = account_data.get("name") or account_login # Use login if name is null
+
+        if not github_id or not account_id or not account_login or not account_type:
+            logger.warning("Installation event payload missing required fields (github_id, account_id, account_login, account_type).")
+            return {
+                "success": False, 
+                "message": "Missing required fields in installation payload",
+                "event_type": event_type # Use determined event type
+            }
+
+        try:
+            with get_session() as session:
+                # Find existing installation by GitHub ID
+                installation = session.query(Installation).filter_by(github_id=github_id).first()
+                
+                # --- Installation Lifecycle Actions --- 
+                if action == "created":
+                    if installation:
+                        # Update existing (potentially re-installed after deletion)
+                        installation.is_active = True
+                        installation.suspended_reason = None
+                        installation.account_id = account_id
+                        installation.account_type = account_type
+                        installation.account_login = account_login
+                        installation.account_name = account_name
+                        logger.info(f"Re-activated installation ID {github_id} for {account_login}")
+                    else:
+                        # Create new installation
+                        installation = Installation(
+                            github_id=github_id,
+                            account_id=account_id,
+                            account_type=account_type,
+                            account_login=account_login,
+                            account_name=account_name,
+                            is_active=True,
+                        )
+                        session.add(installation)
+                        logger.info(f"Created new installation ID {github_id} for {account_login}")
+                    
+                    # Process repositories included in the 'created' payload
+                    repositories_added = payload.get("repositories", []) # Note: 'repositories' key here
+                    if installation and repositories_added:
+                        self._update_repositories(session, installation, repositories_added, [])
+
+                elif action == "deleted":
+                    if installation:
+                        installation.is_active = False
+                        installation.access_token = None # Clear token on deletion
+                        installation.token_expires_at = None
+                        logger.info(f"Deactivated installation ID {github_id} for {account_login}")
+
+                        # Optionally: Mark associated repositories as inactive or delete them?
+                        # For now, we leave Repository records but the Installation is inactive.
+                        logger.info(f"Deactivated installation ID {github_id} for {account_login}. Repositories remain linked but inactive.")
+                    else:
+                        logger.warning(f"Received 'deleted' event for unknown installation ID {github_id}")
+                        # Optionally create an inactive record? Or just ignore.
+
+                elif action == "suspend":
+                    if installation:
+                        installation.is_active = False
+                        installation.suspended_reason = payload.get("reason", "Suspended by GitHub")
+                        installation.access_token = None # Clear token on suspension
+                        installation.token_expires_at = None
+                        logger.info(f"Suspended installation ID {github_id} for {account_login}")
+                    else:
+                        logger.warning(f"Received 'suspend' event for unknown installation ID {github_id}")
+                
+                elif action == "unsuspend":
+                    if installation:
+                        installation.is_active = True
+                        installation.suspended_reason = None
+                        logger.info(f"Unsuspended installation ID {github_id} for {account_login}")
+                    else:
+                        logger.warning(f"Received 'unsuspend' event for unknown installation ID {github_id}")
+                        # Might need to create it if it was deleted previously? Or assume it exists.
+
+                # --- Repository Management Actions (from 'installation_repositories' event) --- 
+                elif event_type == "installation_repositories" and action in ["added", "removed"]:
+                    if not installation:
+                        logger.warning(f"Received '{action}' repo event for unknown/inactive installation ID {github_id}. Ignoring.")
+                    elif not installation.is_active:
+                        logger.warning(f"Received '{action}' repo event for inactive installation ID {github_id}. Ignoring.")
+                    else:
+                        # Get lists of repos added/removed from this specific event payload
+                        repositories_added = payload.get("repositories_added", [])
+                        repositories_removed = payload.get("repositories_removed", [])
+                        self._update_repositories(session, installation, repositories_added, repositories_removed)
+
+                else:
+                    # Log other actions if needed
+                    logger.info(f"Handling installation action '{action}' for event type '{event_type}' on ID {github_id}")
+
+                # get_session handles commit/rollback automatically
+
+            # Return success response
+            return {
+                "success": True,
+                "message": f"GitHub App action '{action}' (event: {event_type}) processed for {account_login}",
+                "event_type": event_type,
+                "installation_id": github_id,
+                "account": account_login,
+                "action": action
+            }
+
+        except Exception as e:
+            logger.exception(f"Error processing installation event for ID {github_id}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error processing installation event: {str(e)}",
+                "event_type": event_type,
+                "installation_id": github_id,
+                "action": action
+            }
+
+    def _update_repositories(self, session, installation: Installation, repos_added: List[Dict[str, Any]], repos_removed: List[Dict[str, Any]]):
+        """
+        Helper to add/remove repositories associated with an installation.
+
+        Args:
+            session: The SQLAlchemy session object.
+            installation: The Installation ORM object.
+            repos_added: List of repository dicts to add from the webhook payload.
+            repos_removed: List of repository dicts to remove from the webhook payload.
+        """
+        # Add repositories
+        for repo_data in repos_added:
+            github_repo_id = repo_data.get("id")
+            name = repo_data.get("name")
+            full_name = repo_data.get("full_name")
+            is_private = repo_data.get("private", False)
+            clone_url = repo_data.get("clone_url")
+            default_branch = repo_data.get("default_branch", "main") # Add default branch
+
+            if not github_repo_id or not name or not full_name:
+                logger.warning(f"Skipping added repo due to missing data: {repo_data}")
+                continue
+
+            # Check if repository already exists (by GitHub ID)
+            existing_repo = session.query(Repository).filter_by(github_id=github_repo_id).first()
+
+            if existing_repo:
+                # If it exists, ensure it's linked to the *current* installation
+                # (A repo could theoretically be moved between installations, though unlikely)
+                if existing_repo.installation_id != installation.id:
+                    logger.info(f"Updating installation link for existing repository {full_name} (ID: {github_repo_id}) to installation {installation.id}")
+                    existing_repo.installation_id = installation.id
+                else:
+                    logger.info(f"Repository {full_name} (ID: {github_repo_id}) already exists and is linked.")
+            else:
+                # Create new repository
+                logger.info(f"Adding repository {full_name} (ID: {github_repo_id}) to installation {installation.id}")
+                new_repo = Repository(
+                    installation_id=installation.id,
+                    github_id=github_repo_id,
+                    name=name,
+                    full_name=full_name,
+                    is_private=is_private,
+                    clone_url=clone_url,
+                    default_branch=default_branch,
+                    # user_id can be set later if needed
+                )
+                session.add(new_repo)
         
-        return {
-            "success": True,
-            "message": f"GitHub App {action} by {account}",
-            "event_type": payload.get("event_type", "installation"),
-            "installation_id": installation_id,
-            "account": account,
-            "action": action
-        } 
+        # Remove repositories (by marking as inactive or deleting? Let's delete for now)
+        # We identify them by github_id from the payload
+        repo_ids_to_remove = {repo_data.get("id") for repo_data in repos_removed if repo_data.get("id")}
+
+        if repo_ids_to_remove:
+            # Find repositories linked to *this* installation that match the IDs to remove
+            repos_to_delete = session.query(Repository).filter(
+                Repository.installation_id == installation.id,
+                Repository.github_id.in_(repo_ids_to_remove)
+            ).all()
+
+            for repo in repos_to_delete:
+                logger.info(f"Deleting repository {repo.full_name} (ID: {repo.github_id}) from installation {installation.id}")
+                session.delete(repo)
+            
+            if len(repos_to_delete) != len(repo_ids_to_remove):
+                 logger.warning(f"Mismatch removing repos: Payload listed {len(repo_ids_to_remove)}, found and deleted {len(repos_to_delete)} linked to installation {installation.id}") 
