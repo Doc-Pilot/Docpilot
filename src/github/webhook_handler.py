@@ -13,6 +13,7 @@ from ..utils.logging import core_logger
 from ..database import get_session
 from ..models.installation import Installation
 from ..models.repository import Repository
+from .auth import get_installation_access_token, is_token_expiring_soon
 
 logger = core_logger()
 
@@ -115,7 +116,8 @@ class WebhookHandler:
     
     async def handle_push_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle a push event.
+        Handle a push event, focusing on the default branch for active installations.
+        Retrieves/refreshes installation token if needed.
         
         Args:
             payload: The webhook payload from GitHub
@@ -123,37 +125,102 @@ class WebhookHandler:
         Returns:
             Dictionary with handling results
         """
-        # Extract repository information
-        repo_info = payload.get("repository", {})
-        repo_name = repo_info.get("full_name", "")
+        repo_data = payload.get("repository", {})
+        repo_github_id = repo_data.get("id")
+        repo_full_name = repo_data.get("full_name", "N/A")
+        ref = payload.get("ref", "") # e.g., "refs/heads/main"
+        after_sha = payload.get("after", "N/A") # SHA of the latest commit pushed
         
-        # Extract push information
-        ref = payload.get("ref", "")  # e.g., "refs/heads/main"
+        if not repo_github_id or not ref:
+            logger.warning("Push event payload missing repository ID or ref.")
+            return {"success": False, "message": "Missing repository ID or ref in push payload"}
+            
+        # Check if it's a branch push (ignore tag pushes etc.)
+        if not ref.startswith("refs/heads/"):
+            logger.info(f"Ignoring push event for non-branch ref: {ref} in {repo_full_name}")
+            return {"success": True, "message": "Ignored non-branch push event"}
+            
         branch = ref.replace("refs/heads/", "")
         
-        # Base reference is the previous commit
-        before_sha = payload.get("before", "")
-        after_sha = payload.get("after", "")
-        
-        # Commits info
-        commits = payload.get("commits", [])
-        commit_count = len(commits)
-        
-        # For testing, just log and return success
-        logger.info(f"Push event handled: {commit_count} commit(s) to {branch} in {repo_name}")
-        
-        return {
-            "success": True,
-            "message": f"Push to {branch} in {repo_name} successfully received",
-            "event_type": "push",
-            "repository": repo_name,
-            "branch": branch,
-            "commits": commit_count
-        }
+        try:
+            with get_session() as session:
+                # Find the repository by its GitHub ID
+                repository = session.query(Repository).filter_by(github_id=repo_github_id).first()
+                
+                if not repository:
+                    logger.warning(f"Received push event for untracked repository ID {repo_github_id} ({repo_full_name}). App may need install/config update.")
+                    return {"success": False, "message": "Repository not found in database"}
+                
+                # Check if push is to the default branch
+                if branch != repository.default_branch:
+                    logger.info(f"Ignoring push event to non-default branch '{branch}' for {repo_full_name} (default: {repository.default_branch})")
+                    return {"success": True, "message": f"Ignored push to non-default branch '{branch}'"}
+                    
+                # Get the installation
+                installation = repository.installation 
+                if not installation:
+                    logger.error(f"Repository {repo_full_name} (ID: {repo_github_id}) is not linked to an installation.")
+                    return {"success": False, "message": "Repository not linked to an installation"}
+                    
+                # Check if installation is active
+                if not installation.is_active:
+                    logger.info(f"Ignoring push event for inactive installation ID {installation.github_id} ({installation.account_login}) linked to repo {repo_full_name}")
+                    return {"success": True, "message": "Installation is inactive"}
+                    
+                # --- Get / Refresh Authentication Token --- 
+                access_token = installation.access_token
+                expires_at = installation.token_expires_at
+                token_valid = False
+
+                if access_token and expires_at and not is_token_expiring_soon(expires_at):
+                    logger.info(f"Using existing valid token for installation {installation.github_id}")
+                    token_valid = True
+                else:
+                    logger.info(f"Token is missing, invalid, or expiring soon for installation {installation.github_id}. Refreshing...")
+                    # Refresh token - reusing helper from Task 1.2 integration
+                    new_token, new_expires_at = await self._get_and_store_token(session, installation)
+                    if new_token:
+                        access_token = new_token # Use the new token for this request
+                        token_valid = True
+                        logger.info(f"Successfully refreshed and stored token for installation {installation.github_id}")
+                    else:
+                        logger.error(f"Failed to refresh token for installation {installation.github_id}. Cannot process push event.")
+                        # Mark as not valid, proceed to return failure
+                        token_valid = False 
+                # -------------------------------------------
+
+                if not token_valid:
+                     return {"success": False, "message": f"Failed to obtain valid installation token for push event on {repo_full_name}"}
+
+                # --- Placeholder for Triggering Documentation Pipeline --- 
+                logger.info(f"Processing push to default branch '{branch}' for repo {repo_full_name} (Installation: {installation.github_id}) - Commit: {after_sha}")
+                logger.info("[MVP Placeholder] Documentation generation would be triggered here using the obtained token.")
+                # Example: await trigger_doc_pipeline(installation_id=installation.id, repo_id=repository.id, commit_sha=after_sha, auth_token=access_token)
+                # ---------------------------------------------------------
+
+            # If we reached here, processing was successful (or ignored intentionally)
+            return {
+                "success": True,
+                "message": f"Push to default branch '{branch}' in {repo_full_name} processed.",
+                "event_type": "push",
+                "repository": repo_full_name,
+                "branch": branch,
+                "commit_sha": after_sha
+            }
+
+        except Exception as e:
+            logger.exception(f"Error processing push event for repo {repo_full_name}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error processing push event: {str(e)}",
+                "event_type": "push",
+                "repository": repo_full_name
+            }
     
     async def handle_pull_request_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle a pull request event.
+        Handle a pull request event, specifically merged PRs for active installations.
+        Retrieves/refreshes installation token if needed.
         
         Args:
             payload: The webhook payload from GitHub
@@ -161,40 +228,99 @@ class WebhookHandler:
         Returns:
             Dictionary with handling results
         """
-        # Extract repository information
-        repo_info = payload.get("repository", {})
-        repo_name = repo_info.get("full_name", "")
-        
-        # Extract PR information
-        pr_info = payload.get("pull_request", {})
-        pr_number = pr_info.get("number", 0)
-        pr_title = pr_info.get("title", "")
         pr_action = payload.get("action", "")
+        pr_info = payload.get("pull_request", {})
+        is_merged = pr_info.get("merged", False)
         
-        # Extract branch information
-        base_branch = pr_info.get("base", {}).get("ref", "")
-        head_branch = pr_info.get("head", {}).get("ref", "")
-        
-        # Check if this is a PR merge
-        is_merged = False
-        if pr_action == "closed" and pr_info.get("merged", False):
-            is_merged = True
-        
-        # For testing, just log and return success
-        action_text = f"{pr_action} (merged: {is_merged})" if pr_action == "closed" else pr_action
-        logger.info(f"PR event handled: {action_text} PR #{pr_number} '{pr_title}' ({head_branch} → {base_branch}) in {repo_name}")
-        
-        return {
-            "success": True,
-            "message": f"PR #{pr_number} {action_text} in {repo_name} successfully received",
-            "event_type": "pull_request",
-            "repository": repo_name,
-            "pr_number": pr_number,
-            "action": pr_action,
-            "is_merged": is_merged,
-            "base_branch": base_branch,
-            "head_branch": head_branch
-        }
+        # --- Filter for merged PRs only --- 
+        if not (pr_action == "closed" and is_merged):
+            logger.info(f"Ignoring PR event with action '{pr_action}' (merged: {is_merged})")
+            return {"success": True, "message": f"Ignored PR event (action: {pr_action}, merged: {is_merged})"}
+        # -------------------------------------
+            
+        repo_data = payload.get("repository", {})
+        repo_github_id = repo_data.get("id")
+        repo_full_name = repo_data.get("full_name", "N/A")
+        pr_number = payload.get("number", "N/A") # PR number
+        merge_commit_sha = pr_info.get("merge_commit_sha", "N/A")
+        base_branch = pr_info.get("base", {}).get("ref", "N/A")
+        head_branch = pr_info.get("head", {}).get("ref", "N/A")
+        pr_title = pr_info.get("title", "N/A")
+
+        if not repo_github_id:
+            logger.warning("Pull request event payload missing repository ID.")
+            return {"success": False, "message": "Missing repository ID in pull request payload"}
+
+        try:
+            with get_session() as session:
+                # Find the repository by its GitHub ID
+                repository = session.query(Repository).filter_by(github_id=repo_github_id).first()
+                
+                if not repository:
+                    logger.warning(f"Received PR event for untracked repository ID {repo_github_id} ({repo_full_name}). App may need install/config update.")
+                    return {"success": False, "message": "Repository not found in database"}
+                
+                # Get the installation
+                installation = repository.installation 
+                if not installation:
+                    logger.error(f"Repository {repo_full_name} (ID: {repo_github_id}) is not linked to an installation.")
+                    return {"success": False, "message": "Repository not linked to an installation"}
+                    
+                # Check if installation is active
+                if not installation.is_active:
+                    logger.info(f"Ignoring PR event for inactive installation ID {installation.github_id} ({installation.account_login}) linked to repo {repo_full_name}")
+                    return {"success": True, "message": "Installation is inactive"}
+                    
+                # --- Get / Refresh Authentication Token --- 
+                access_token = installation.access_token
+                expires_at = installation.token_expires_at
+                token_valid = False
+
+                if access_token and expires_at and not is_token_expiring_soon(expires_at):
+                    logger.info(f"Using existing valid token for installation {installation.github_id} for PR merge.")
+                    token_valid = True
+                else:
+                    logger.info(f"Token is missing, invalid, or expiring soon for installation {installation.github_id} for PR merge. Refreshing...")
+                    new_token, new_expires_at = await self._get_and_store_token(session, installation)
+                    if new_token:
+                        access_token = new_token
+                        token_valid = True
+                        logger.info(f"Successfully refreshed and stored token for installation {installation.github_id} for PR merge.")
+                    else:
+                        logger.error(f"Failed to refresh token for installation {installation.github_id}. Cannot process PR merge event.")
+                        token_valid = False 
+                # -------------------------------------------
+
+                if not token_valid:
+                     return {"success": False, "message": f"Failed to obtain valid installation token for PR merge event on {repo_full_name}"}
+
+                # --- Placeholder for Triggering Documentation Pipeline --- 
+                logger.info(f"Processing PR Merge for repo {repo_full_name} (Installation: {installation.github_id}) - PR #{pr_number} '{pr_title}', Merge SHA: {merge_commit_sha}")
+                logger.info("[MVP Placeholder] Documentation generation would be triggered here using the obtained token.")
+                # Example: await trigger_doc_pipeline_for_pr(installation_id=installation.id, repo_id=repository.id, pr_number=pr_number, merge_commit_sha=merge_commit_sha, auth_token=access_token)
+                # ---------------------------------------------------------
+
+            # If we reached here, processing was successful
+            return {
+                "success": True,
+                "message": f"Merged PR #{pr_number} in {repo_full_name} processed.",
+                "event_type": "pull_request",
+                "repository": repo_full_name,
+                "pr_number": pr_number,
+                "action": pr_action,
+                "is_merged": is_merged,
+                "merge_commit_sha": merge_commit_sha
+            }
+
+        except Exception as e:
+            logger.exception(f"Error processing PR event for repo {repo_full_name}, PR #{pr_number}: {str(e)}")
+            return {
+                "success": False,
+                "message": f"Error processing pull_request event: {str(e)}",
+                "event_type": "pull_request",
+                "repository": repo_full_name,
+                "pr_number": pr_number
+            }
     
     def handle_ping_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -289,6 +415,17 @@ class WebhookHandler:
                     repositories_added = payload.get("repositories", []) # Note: 'repositories' key here
                     if installation and repositories_added:
                         self._update_repositories(session, installation, repositories_added, [])
+                    
+                    # --- Get and store initial access token ---    
+                    if installation:
+                        token, expires_at = await self._get_and_store_token(session, installation)
+                        if not token:
+                            logger.error(f"Failed to obtain initial installation token for {github_id}. Installation record created/updated but unusable.")
+                            # Decide on error handling: raise exception? return error response? For now, log it.
+                        else:
+                            logger.info(f"Successfully obtained and stored initial token for installation {github_id}")
+                            # Ensure the changes are flushed before commit if needed, though get_session handles commit.
+                    # -------------------------------------------
 
                 elif action == "deleted":
                     if installation:
@@ -322,6 +459,16 @@ class WebhookHandler:
                     else:
                         logger.warning(f"Received 'unsuspend' event for unknown installation ID {github_id}")
                         # Might need to create it if it was deleted previously? Or assume it exists.
+                        # If we created it here, we'd need to get a token too.
+                        
+                    # --- Get and store access token on unsuspend --- 
+                    if installation and installation.is_active:
+                        token, expires_at = await self._get_and_store_token(session, installation)
+                        if not token:
+                            logger.error(f"Failed to obtain token for unsuspended installation {github_id}. Installation is active but may be unusable without a token.")
+                        else:
+                            logger.info(f"Successfully obtained and stored token for unsuspended installation {github_id}")
+                    # -------------------------------------------
 
                 # --- Repository Management Actions (from 'installation_repositories' event) --- 
                 elif event_type == "installation_repositories" and action in ["added", "removed"]:
@@ -360,6 +507,37 @@ class WebhookHandler:
                 "installation_id": github_id,
                 "action": action
             }
+
+    async def _get_and_store_token(self, session, installation: Installation) -> tuple[str | None, datetime | None]:
+        """
+        Helper function to get an installation token and store it in the database.
+
+        Args:
+            session: The SQLAlchemy session.
+            installation: The Installation object to update.
+
+        Returns:
+            A tuple of (token, expires_at) or (None, None) on failure.
+        """
+        logger.info(f"Attempting to retrieve and store token for installation ID {installation.github_id}")
+        # Note: get_installation_access_token is synchronous, but we keep the handler async
+        # In a high-concurrency scenario, consider running sync code in a thread pool
+        # or using an async HTTP client library (e.g., httpx) in auth.py
+        access_token, expires_at = get_installation_access_token(installation.github_id)
+
+        if access_token and expires_at:
+            installation.access_token = access_token
+            installation.token_expires_at = expires_at
+            # The session commit is handled by the get_session context manager
+            # session.add(installation) # Not needed if installation is already managed by session
+            logger.info(f"Successfully stored token for installation {installation.github_id}")
+            return access_token, expires_at
+        else:
+            logger.error(f"Failed to retrieve token for installation {installation.github_id}")
+            # Optionally clear existing token fields if retrieval fails?
+            # installation.access_token = None
+            # installation.token_expires_at = None
+            return None, None
 
     def _update_repositories(self, session, installation: Installation, repos_added: List[Dict[str, Any]], repos_removed: List[Dict[str, Any]]):
         """
